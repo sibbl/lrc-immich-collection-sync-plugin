@@ -1,0 +1,4 @@
+local SyncServiceProvider = require "SyncServiceProvider"
+local showStorageConfigurationDialog = SyncServiceProvider.showStorageConfigurationDialog
+
+showStorageConfigurationDialog()

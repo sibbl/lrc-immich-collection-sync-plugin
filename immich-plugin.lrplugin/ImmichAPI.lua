@@ -624,6 +624,20 @@ function ImmichAPI:checkIfAlbumExists(albumId)
     end
 end
 
+function ImmichAPI:getLibraries()
+    log:trace("ImmichAPI: getLibraries")
+    local path = '/libraries'
+    local parsedResponse = ImmichAPI.doGetRequest(self, path)
+    return parsedResponse
+end
+
+function ImmichAPI:getAssetWithPath(assetId)
+    log:trace("ImmichAPI: getAssetWithPath for: " .. assetId)
+    local path = '/assets/' .. assetId
+    local parsedResponse = ImmichAPI.doGetRequest(self, path)
+    return parsedResponse
+end
+
 function ImmichAPI:getAlbumInfo(albumId)
     log:trace("ImmichAPI: getAlbumInfo for: " .. albumId)
     local albumInfo = ImmichAPI.doGetRequest(self, '/albums/' .. albumId)
