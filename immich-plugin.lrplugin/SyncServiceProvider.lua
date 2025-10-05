@@ -63,10 +63,26 @@ local function showStorageConfigurationDialog()
                     if libraries and type(libraries) == "table" and #libraries > 0 then
                         propertyTable.libraries = libraries
                         propertyTable.librariesFound = true
-                        LrDialogs.message('Connection successful', 'Found ' .. #libraries .. ' libraries. You can now configure path mappings below.')
+                        log:info("Found libraries: " .. util.dumpTable(libraries))
+                        LrDialogs.message('Connection successful', 'Found ' .. #libraries .. ' libraries. Check plugin logs for library details.')
                     else
                         propertyTable.librariesFound = false
-                        LrDialogs.message('Connection successful', 'No libraries found via API. You can manually configure path mappings below.')
+                        log:info("No libraries found or libraries endpoint returned: " .. tostring(libraries))
+                        
+                        -- Try to get a sample album to see asset path structure
+                        local albums = immich:getAlbumsWODate()
+                        if albums and #albums > 0 then
+                            local sampleAlbum = albums[1]
+                            local albumAssets = immich:getAlbumAssets(sampleAlbum.value)
+                            if albumAssets and #albumAssets > 0 then
+                                local sampleAsset = immich:getAssetWithPath(albumAssets[1].id)
+                                if sampleAsset then
+                                    log:info("Sample asset structure for path mapping reference: " .. util.dumpTable(sampleAsset))
+                                end
+                            end
+                        end
+                        
+                        LrDialogs.message('Connection successful', 'Libraries endpoint not available. Check plugin logs for sample asset paths to configure mappings.')
                     end
                 else
                     LrDialogs.message('Connection test failed')
@@ -172,12 +188,24 @@ local function showStorageConfigurationDialog()
                 
                 f:row {
                     f:static_text {
-                        title = "Example:",
+                        title = "Example Mapping:",
                         alignment = 'right',
                         width = share 'labelWidth'
                     },
                     f:static_text {
-                        title = "/external-library/photos -> /Users/username/Photos",
+                        title = "Immich: /external-library/photos  ->  Local: /Users/username/Photos",
+                        font = "<system/small>",
+                    },
+                },
+                
+                f:row {
+                    f:static_text {
+                        title = "Note:",
+                        alignment = 'right',
+                        width = share 'labelWidth'
+                    },
+                    f:static_text {
+                        title = "After testing connection, check plugin logs to see actual Immich paths for configuration.",
                         font = "<system/small>",
                     },
                 },
@@ -253,30 +281,43 @@ local function showSyncDialog()
             propertyTable.removeOld = true
             propertyTable.newCount = 0
             propertyTable.removeCount = 0
+            propertyTable.analyzing = false
             
             -- Function to analyze sync changes
             local function analyzeSyncChanges()
                 if not propertyTable.selectedAlbum then return end
                 
                 LrTasks.startAsyncTask(function()
+                    -- Update UI to show analysis in progress
+                    propertyTable.analyzing = true
+                    
                     local albumAssets = immich:getAlbumAssets(propertyTable.selectedAlbum)
                     local collectionPhotos = selectedCollection:getPhotos()
                     
                     if not albumAssets then
                         LrDialogs.message("Error", "Failed to get album assets.", "critical")
+                        propertyTable.analyzing = false
                         return
                     end
                     
+                    log:info("Analyzing sync for " .. #albumAssets .. " album assets and " .. #collectionPhotos .. " collection photos")
+                    
                     -- Get detailed asset info including paths
                     local albumPaths = {}
+                    local unmappedAssets = {}
+                    
                     for _, asset in ipairs(albumAssets) do
-                        local assetInfo = immich:getAssetWithPath(asset.id)
-                        if assetInfo and assetInfo.originalPath then
-                            -- Convert Immich path to local path
-                            local localPath = convertImmichPathToLocal(assetInfo.originalPath)
-                            if localPath then
-                                albumPaths[localPath] = asset.id
-                            end
+                        local localPath, immichPath = getAssetPathInfo(immich, asset.id)
+                        if localPath then
+                            albumPaths[localPath] = {
+                                assetId = asset.id,
+                                immichPath = immichPath
+                            }
+                        else
+                            table.insert(unmappedAssets, {
+                                id = asset.id,
+                                fileName = asset.originalFileName
+                            })
                         end
                     end
                     
@@ -309,6 +350,19 @@ local function showSyncDialog()
                     propertyTable.removeCount = #removePaths
                     propertyTable.newPaths = newPaths
                     propertyTable.removePaths = removePaths
+                    propertyTable.analyzing = false
+                    
+                    -- Report unmapped assets if any
+                    if #unmappedAssets > 0 then
+                        local message = "Warning: " .. #unmappedAssets .. " assets in the album could not be mapped to local paths:\n\n"
+                        for _, asset in ipairs(unmappedAssets) do
+                            message = message .. "- " .. (asset.fileName or asset.id) .. "\n"
+                        end
+                        message = message .. "\nPlease check your storage path configuration."
+                        LrDialogs.message("Path Mapping Warning", message, "warning")
+                    end
+                    
+                    log:info("Analysis complete: " .. #newPaths .. " new, " .. #removePaths .. " to remove, " .. #unmappedAssets .. " unmapped")
                 end)
             end
             
@@ -349,7 +403,16 @@ local function showSyncDialog()
                         end,
                     },
                     f:push_button {
-                        title = 'Analyze',
+                        title = bind {
+                            key = 'analyzing',
+                            transform = function(value)
+                                return value and 'Analyzing...' or 'Analyze'
+                            end,
+                        },
+                        enabled = bind {
+                            key = 'analyzing',
+                            transform = function(value) return not value end,
+                        },
                         action = analyzeSyncChanges,
                     },
                 },
@@ -410,14 +473,25 @@ local function convertImmichPathToLocal(immichPath)
     
     if not immichPath then return nil end
     
+    log:trace("Converting Immich path to local: " .. immichPath)
+    
     -- For internal library
     if prefs.internalLibraryPath and prefs.internalLibraryPath ~= "" then
-        -- Assume internal library paths start with /usr/src/app/upload or similar
-        -- Map these to the configured internal library path
-        local internalPattern = "^/usr/src/app/upload/"
-        if string.match(immichPath, internalPattern) then
-            local relativePath = string.gsub(immichPath, internalPattern, "")
-            return LrPathUtils.child(prefs.internalLibraryPath, relativePath)
+        -- Common Immich internal library patterns
+        local internalPatterns = {
+            "^/usr/src/app/upload/",
+            "^/upload/",
+            "^upload/",
+            "^./upload/",
+        }
+        
+        for _, pattern in ipairs(internalPatterns) do
+            if string.match(immichPath, pattern) then
+                local relativePath = string.gsub(immichPath, pattern, "")
+                local localPath = LrPathUtils.child(prefs.internalLibraryPath, relativePath)
+                log:trace("Mapped to internal library: " .. localPath)
+                return localPath
+            end
         end
     end
     
@@ -425,15 +499,60 @@ local function convertImmichPathToLocal(immichPath)
     if prefs.externalLibraryPaths then
         for _, mapping in ipairs(prefs.externalLibraryPaths) do
             if mapping.immichPath and mapping.localPath then
+                -- Try exact prefix match
                 if string.find(immichPath, mapping.immichPath, 1, true) == 1 then
                     local relativePath = string.sub(immichPath, #mapping.immichPath + 1)
-                    return LrPathUtils.child(mapping.localPath, relativePath)
+                    -- Handle leading slash in relative path
+                    if string.sub(relativePath, 1, 1) == "/" then
+                        relativePath = string.sub(relativePath, 2)
+                    end
+                    local localPath = LrPathUtils.child(mapping.localPath, relativePath)
+                    log:trace("Mapped to external library: " .. localPath)
+                    return localPath
                 end
             end
         end
     end
     
+    -- If no mapping found, try as absolute path (for testing)
+    if LrFileUtils.exists(immichPath) then
+        log:trace("Using path as-is: " .. immichPath)
+        return immichPath
+    end
+    
+    log:warn("No mapping found for Immich path: " .. immichPath)
     return nil
+end
+
+-- Enhanced asset info retrieval with better path handling
+local function getAssetPathInfo(immich, assetId)
+    local assetInfo = immich:getAssetWithPath(assetId)
+    if not assetInfo then
+        log:warn("Could not get asset info for ID: " .. assetId)
+        return nil
+    end
+    
+    -- Try different possible path fields from Immich asset response
+    local possiblePaths = {
+        assetInfo.originalPath,
+        assetInfo.originalFileName,
+        assetInfo.path,
+        assetInfo.filePath,
+        assetInfo.libraryPath,
+    }
+    
+    for _, path in ipairs(possiblePaths) do
+        if path then
+            local localPath = convertImmichPathToLocal(path)
+            if localPath then
+                return localPath, path
+            end
+        end
+    end
+    
+    -- If no path found in standard fields, log the asset structure for debugging
+    log:trace("Asset info structure for " .. assetId .. ": " .. util.dumpTable(assetInfo))
+    return nil, nil
 end
 
 -- Perform the actual sync operation
