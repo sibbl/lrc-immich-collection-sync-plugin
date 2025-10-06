@@ -35,6 +35,10 @@ return {
 			title = "Immich sync configuration",
 			file = "SyncConfiguration.lua",
 		},
+		{
+			title = "Sync with Immich Album",
+			file = "SyncDialog.lua",
+		},
 	},
 
 	LrExportMenuItems = {
@@ -48,12 +52,7 @@ return {
 		},
 	},
 
-	LrCollectionMenuItems = {
-		{
-			title = "Sync with Immich Album",
-			file = "SyncDialog.lua",
-		},
-	},
+
 
 	LrPluginInfoProvider = 'PluginInfo.lua',
 
