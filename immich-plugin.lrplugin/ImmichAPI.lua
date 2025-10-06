@@ -631,12 +631,7 @@ function ImmichAPI:getLibraries()
     return parsedResponse
 end
 
-function ImmichAPI:getAssetWithPath(assetId)
-    log:trace("ImmichAPI: getAssetWithPath for: " .. assetId)
-    local path = '/assets/' .. assetId
-    local parsedResponse = ImmichAPI.doGetRequest(self, path)
-    return parsedResponse
-end
+
 
 function ImmichAPI:getAlbumInfo(albumId)
     log:trace("ImmichAPI: getAlbumInfo for: " .. albumId)

@@ -43,7 +43,8 @@ local function showStorageConfigurationDialog()
         -- Initialize values from preferences
         propertyTable.url = prefs.url or ""
         propertyTable.apiKey = prefs.apiKey or ""
-        propertyTable.internalLibraryPath = prefs.internalLibraryPath or ""
+        propertyTable.uploadLocationPath = prefs.uploadLocationPath or ""
+        propertyTable.uploadLocationImmichPath = prefs.uploadLocationImmichPath or "/data/library"
         propertyTable.externalLibraryPaths = prefs.externalLibraryPaths or {}
         propertyTable.libraries = {}
         propertyTable.librariesFound = false
@@ -63,8 +64,25 @@ local function showStorageConfigurationDialog()
                     if libraries and type(libraries) == "table" and #libraries > 0 then
                         propertyTable.libraries = libraries
                         propertyTable.librariesFound = true
+                        
+                        -- Initialize external library path mappings from libraries response
+                        local externalMappings = {}
+                        for _, library in ipairs(libraries) do
+                            if library.importPaths then
+                                for _, importPath in ipairs(library.importPaths) do
+                                    table.insert(externalMappings, {
+                                        libraryName = library.name,
+                                        libraryId = library.id,
+                                        immichPath = importPath,
+                                        localPath = ""  -- User will configure this
+                                    })
+                                end
+                            end
+                        end
+                        propertyTable.externalLibraryPaths = externalMappings
+                        
                         log:info("Found libraries: " .. util.dumpTable(libraries))
-                        LrDialogs.message('Connection successful', 'Found ' .. #libraries .. ' libraries. Check plugin logs for library details.')
+                        LrDialogs.message('Connection successful', 'Found ' .. #libraries .. ' external libraries. Configure local paths below.')
                     else
                         propertyTable.librariesFound = false
                         log:info("No libraries found or libraries endpoint returned: " .. tostring(libraries))
@@ -75,7 +93,7 @@ local function showStorageConfigurationDialog()
                             local sampleAlbum = albums[1]
                             local albumAssets = immich:getAlbumAssets(sampleAlbum.value)
                             if albumAssets and #albumAssets > 0 then
-                                local sampleAsset = immich:getAssetWithPath(albumAssets[1].id)
+                                local sampleAsset = immich:getAssetInfo(albumAssets[1].id)
                                 if sampleAsset then
                                     log:info("Sample asset structure for path mapping reference: " .. util.dumpTable(sampleAsset))
                                 end
@@ -88,6 +106,72 @@ local function showStorageConfigurationDialog()
                     LrDialogs.message('Connection test failed')
                 end
             end)
+        end
+        
+        -- Function to create external library UI elements
+        local function createExternalLibrariesUI()
+            local elements = {}
+            
+            if propertyTable.librariesFound and propertyTable.externalLibraryPaths then
+                table.insert(elements, f:static_text {
+                    title = "External Libraries:",
+                    font = "<system/bold>",
+                })
+                
+                for i, mapping in ipairs(propertyTable.externalLibraryPaths) do
+                    -- Group box for each library
+                    table.insert(elements, f:group_box {
+                        title = mapping.libraryName or "External Library " .. i,
+                        fill_horizontal = 1,
+                        
+                        f:static_text {
+                            title = "Immich Path: " .. (mapping.immichPath or ""),
+                            font = "<system/small>",
+                        },
+                        
+                        f:row {
+                            f:static_text {
+                                title = "Local Path:",
+                                alignment = 'right',
+                                width = share 'labelWidth'
+                            },
+                            f:edit_field {
+                                value = bind('externalLibraryPaths[' .. i .. '].localPath'),
+                                truncation = 'middle',
+                                immediate = false,
+                                fill_horizontal = 1,
+                                width_in_chars = 28,
+                            },
+                            f:push_button {
+                                title = 'Browse...',
+                                action = function()
+                                    local path = LrDialogs.runOpenPanel {
+                                        title = "Select Local Path for " .. (mapping.libraryName or "External Library"),
+                                        canChooseFiles = false,
+                                        canChooseDirectories = true,
+                                        allowsMultipleSelection = false,
+                                    }
+                                    if path and path[1] then
+                                        propertyTable.externalLibraryPaths[i].localPath = path[1]
+                                    end
+                                end,
+                            },
+                        },
+                    })
+                end
+            else
+                table.insert(elements, f:static_text {
+                    title = "External Libraries:",
+                    font = "<system/bold>",
+                })
+                
+                table.insert(elements, f:static_text {
+                    title = "Test connection first to discover external libraries automatically.",
+                    font = "<system/small>",
+                })
+            end
+            
+            return elements
         end
         
         local contents = f:column {
@@ -148,68 +232,52 @@ local function showStorageConfigurationDialog()
                 
                 f:row {
                     f:static_text {
-                        title = "Internal Library:",
+                        title = "Immich Server Path:",
                         alignment = 'right',
                         width = share 'labelWidth'
                     },
                     f:edit_field {
-                        value = bind 'internalLibraryPath',
+                        value = bind 'uploadLocationImmichPath',
                         truncation = 'middle',
                         immediate = false,
                         fill_horizontal = 1,
                         width_in_chars = 28,
-                        tooltip = "Local path where Immich internal library files are stored",
+                        tooltip = "Immich server path for upload location (default: /data/library)",
+                    },
+                },
+                
+                f:row {
+                    f:static_text {
+                        title = "Upload Location:",
+                        alignment = 'right',
+                        width = share 'labelWidth'
+                    },
+                    f:edit_field {
+                        value = bind 'uploadLocationPath',
+                        truncation = 'middle',
+                        immediate = false,
+                        fill_horizontal = 1,
+                        width_in_chars = 28,
+                        tooltip = "Local path where Immich upload location files are stored",
                     },
                     f:push_button {
                         title = 'Browse...',
                         action = function()
                             local path = LrDialogs.runOpenPanel {
-                                title = "Select Internal Library Root Path",
+                                title = "Select Upload Location Root Path",
                                 canChooseFiles = false,
                                 canChooseDirectories = true,
                                 allowsMultipleSelection = false,
                             }
                             if path and path[1] then
-                                propertyTable.internalLibraryPath = path[1]
+                                propertyTable.uploadLocationPath = path[1]
                             end
                         end,
                     },
                 },
-                
-                f:static_text {
-                    title = "External Libraries:",
-                    font = "<system/bold>",
-                },
-                
-                f:static_text {
-                    title = "Add mappings for external libraries. Format: /immich/path -> /local/path",
-                    font = "<system/small>",
-                },
-                
-                f:row {
-                    f:static_text {
-                        title = "Example Mapping:",
-                        alignment = 'right',
-                        width = share 'labelWidth'
-                    },
-                    f:static_text {
-                        title = "Immich: /external-library/photos  ->  Local: /Users/username/Photos",
-                        font = "<system/small>",
-                    },
-                },
-                
-                f:row {
-                    f:static_text {
-                        title = "Note:",
-                        alignment = 'right',
-                        width = share 'labelWidth'
-                    },
-                    f:static_text {
-                        title = "After testing connection, check plugin logs to see actual Immich paths for configuration.",
-                        font = "<system/small>",
-                    },
-                },
             },
+            
+            unpack(createExternalLibrariesUI()),
         }
 
         local result = LrDialogs.presentModalDialog {
@@ -225,15 +293,16 @@ local function showStorageConfigurationDialog()
                 return
             end
             
-            if propertyTable.internalLibraryPath == "" then
-                LrDialogs.message("Invalid Configuration", "Internal library path is required.", "warning")
+            if propertyTable.uploadLocationPath == "" then
+                LrDialogs.message("Invalid Configuration", "Upload location path is required.", "warning")
                 return
             end
             
             -- Save configuration
             prefs.url = propertyTable.url
             prefs.apiKey = propertyTable.apiKey
-            prefs.internalLibraryPath = propertyTable.internalLibraryPath
+            prefs.uploadLocationPath = propertyTable.uploadLocationPath
+            prefs.uploadLocationImmichPath = propertyTable.uploadLocationImmichPath
             prefs.externalLibraryPaths = propertyTable.externalLibraryPaths
             log:info("Sync configuration saved")
             LrDialogs.message("Configuration Saved", "Sync configuration has been saved successfully.", "info")
@@ -246,7 +315,7 @@ local function showSyncDialog()
     log:info("Opening collection sync dialog")
     
     -- Check if sync is configured
-    if not prefs.url or not prefs.apiKey or not prefs.internalLibraryPath then
+    if not prefs.url or not prefs.apiKey or not prefs.uploadLocationPath then
         LrDialogs.message("Configuration Required", "Please configure Immich sync settings first.", "info")
         showStorageConfigurationDialog()
         return
@@ -475,23 +544,18 @@ local function convertImmichPathToLocal(immichPath)
     
     log:trace("Converting Immich path to local: " .. immichPath)
     
-    -- For internal library
-    if prefs.internalLibraryPath and prefs.internalLibraryPath ~= "" then
-        -- Common Immich internal library patterns
-        local internalPatterns = {
-            "^/usr/src/app/upload/",
-            "^/upload/",
-            "^upload/",
-            "^./upload/",
-        }
-        
-        for _, pattern in ipairs(internalPatterns) do
-            if string.match(immichPath, pattern) then
-                local relativePath = string.gsub(immichPath, pattern, "")
-                local localPath = LrPathUtils.child(prefs.internalLibraryPath, relativePath)
-                log:trace("Mapped to internal library: " .. localPath)
-                return localPath
+    -- For upload location (internal library)
+    if prefs.uploadLocationPath and prefs.uploadLocationPath ~= "" then
+        local uploadLocationPattern = "^" .. (prefs.uploadLocationImmichPath or "/data/library")
+        if string.match(immichPath, uploadLocationPattern) then
+            local relativePath = string.gsub(immichPath, uploadLocationPattern, "")
+            -- Handle leading slash in relative path
+            if string.sub(relativePath, 1, 1) == "/" then
+                relativePath = string.sub(relativePath, 2)
             end
+            local localPath = LrPathUtils.child(prefs.uploadLocationPath, relativePath)
+            log:trace("Mapped to upload location: " .. localPath)
+            return localPath
         end
     end
     
@@ -526,7 +590,7 @@ end
 
 -- Enhanced asset info retrieval with better path handling
 local function getAssetPathInfo(immich, assetId)
-    local assetInfo = immich:getAssetWithPath(assetId)
+    local assetInfo = immich:getAssetInfo(assetId)
     if not assetInfo then
         log:warn("Could not get asset info for ID: " .. assetId)
         return nil
