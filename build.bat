@@ -1,13 +1,21 @@
 @echo off
+REM Build the distributable Lightroom Classic plugin bundle on Windows.
+setlocal
+cd /d "%~dp0"
 
-if exist immich-export.lrplugin (
-    echo Build directory alread exists.
-) else (
-    echo Creating immich-export.lrplugin
-    md immich-export.lrplugin
+set OUT=dist\lrc-immich-collection-sync-plugin.lrplugin
+set LEGACY_OUT=dist\immich-sync.lrplugin
+if exist "%LEGACY_OUT%" rmdir /s /q "%LEGACY_OUT%"
+if exist "%OUT%" rmdir /s /q "%OUT%"
+mkdir "%OUT%"
+
+xcopy /E /I /Q src\* "%OUT%\" >nul
+if not exist "%OUT%\Info.lua" (
+    echo ERROR: %OUT%\Info.lua missing.
+    exit /b 1
 )
 
-echo Compiling LUA files
-cd immich-export.lrdevplugin
-for %%a in (*.lua) do luac -o ..\immich-export.lrplugin\%%a %%a
-cd ..
+echo Build complete: %OUT%
+echo.
+echo To install in Lightroom Classic:
+echo   File ^> Plug-in Manager... ^> Add ^> select %OUT%
