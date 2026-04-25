@@ -144,6 +144,21 @@ function M:listAlbums()
 	return data, nil
 end
 
+-- Returns array of libraries: { id, name, ownerId, importPaths = {…}, … }.
+-- In current Immich API (/api/libraries) this lists *external* libraries —
+-- those with one or more `importPaths` mapped to filesystem paths inside
+-- the Immich server/container. We use these importPaths to seed local
+-- path-mapping entries so users do not need to look up paths manually.
+function M:listLibraries()
+	local body, _, err = self:_request('GET', '/api/libraries')
+	if err then return nil, err end
+	local data = decode(body)
+	if type(data) ~= 'table' then
+		return nil, Errors.make('bad_response', 'Expected array of libraries')
+	end
+	return data, nil
+end
+
 -- Returns { id, albumName, assets = { {id, originalPath, originalFileName, checksum}, … } }
 function M:getAlbum(albumId)
 	local body, _, err = self:_request('GET',

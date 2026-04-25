@@ -76,3 +76,27 @@ internal    /home/me/immich-library/   /home/me/immich-library/
 ```
 
 Identical prefixes are legal; the mapping just passes through.
+
+## Discovering libraries from Immich
+
+Immich External Libraries can have one or more `importPaths` — each is a
+path the Immich process scans for photos. The plugin can fetch these
+automatically:
+
+1. Open `File > Plug-in Manager… > Immich Sync`.
+2. In **Path Mappings**, click **Fetch libraries from Immich…**.
+3. The dialog lists every library and every `importPath`. For each row,
+   either type the matching local path or click **Browse…** to pick the
+   folder Lightroom uses for that same physical location.
+4. Click **Save mappings**. Resolved entries are merged into the existing
+   mappings (matched by Immich prefix); rows left blank are skipped so
+   you can configure libraries incrementally.
+
+Internal uploads (`/usr/src/app/upload/library/…` for the default Docker
+deployment) are not returned by `/api/libraries`; add that mapping
+manually in the raw text area if your collection contains internally
+uploaded assets.
+
+The whole point: **one physical photo on your NAS, referenced from both
+Immich and Lightroom**. The sync engine never transfers files — it only
+edits album/collection membership.

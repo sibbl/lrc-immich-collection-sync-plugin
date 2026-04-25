@@ -89,4 +89,27 @@ describe('ImmichAPI', function()
 		assertNil(err); assertEq(r.added, 0)
 		assertEq(#http.calls, 0)
 	end)
+
+	it('listLibraries decodes array with importPaths', function()
+		local http = fakeHttp{ { body = '[{"id":"L1","name":"NAS","importPaths":["/mnt/nas/photos","/mnt/nas/scans"]}]',
+			headers = { status = 200 } } }
+		local api = ImmichAPI.new{ serverUrl = 'https://x', apiKey = 'k',
+			http = http, sleep = function() end }
+		local libs, err = api:listLibraries()
+		assertNil(err)
+		assertEq(http.calls[1].method, 'GET')
+		assertEq(http.calls[1].url, 'https://x/api/libraries')
+		assertEq(#libs, 1)
+		assertEq(libs[1].name, 'NAS')
+		assertDeepEq(libs[1].importPaths, { '/mnt/nas/photos', '/mnt/nas/scans' })
+	end)
+
+	it('listLibraries surfaces auth errors', function()
+		local http = fakeHttp{ { body = '', headers = { status = 401 } } }
+		local api = ImmichAPI.new{ serverUrl = 'https://x', apiKey = 'bad',
+			http = http, sleep = function() end }
+		local libs, err = api:listLibraries()
+		assertNil(libs)
+		assertEq(err.code, 'http_401')
+	end)
 end)
