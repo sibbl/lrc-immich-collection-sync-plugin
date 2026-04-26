@@ -14,8 +14,8 @@
       maxRetries (optional) defaults to 3
 ]]
 
-local Errors = require 'util.Errors'
-local JSON = require 'vendor.JSON'
+local Errors = require 'util/Errors'
+local JSON = require 'vendor/JSON'
 
 local M = {}
 M.__index = M

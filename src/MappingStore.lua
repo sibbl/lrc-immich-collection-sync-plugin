@@ -7,7 +7,7 @@
     { albumId = 'uuid', albumName = 'Holidays', serverUrl = 'https://…', linkedAt = 'ISO8601' }
 ]]
 
-local JSON = require 'vendor.JSON'
+local JSON = require 'vendor/JSON'
 
 local M = {}
 M.__index = M

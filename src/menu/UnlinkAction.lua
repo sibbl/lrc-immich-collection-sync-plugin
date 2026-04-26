@@ -6,7 +6,7 @@ local LrDialogs = import 'LrDialogs'
 local LrPrefs = import 'LrPrefs'
 
 local MappingStore = require 'MappingStore'
-local Dialogs = require 'ui.Dialogs'
+local Dialogs = require 'ui/Dialogs'
 
 local collection, reason = Dialogs.activeCollection()
 if not collection then
