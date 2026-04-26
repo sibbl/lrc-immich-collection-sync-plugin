@@ -15,8 +15,8 @@ local LrShell = import 'LrShell'
 
 local Settings = require 'Settings'
 local ImmichAPI = require 'ImmichAPI'
-local Logger = require 'util.Logger'
-local Errors = require 'util.Errors'
+local Logger = require 'ImmichLogger'
+local Errors = require 'ImmichErrors'
 
 local M = {}
 -- Serialize path mappings to a human-editable multi-line text string so we

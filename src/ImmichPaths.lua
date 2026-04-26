@@ -1,0 +1,1 @@
+return require('ImmichAliasLoader').load('util/Paths.lua')

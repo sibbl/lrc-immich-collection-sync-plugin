@@ -9,7 +9,7 @@
   Note: `local` is a Lua keyword, so the field is named `local_` on the wire.
 ]]
 
-local Paths = require 'util.Paths'
+local Paths = require 'ImmichPaths'
 
 local M = {}
 M.__index = M

@@ -96,12 +96,12 @@ function M.computeDiff(opts)
 	for _, asset in ipairs(opts.albumAssets or {}) do
 		local localPath = pathMapper:immichToLocal(asset.originalPath)
 		if localPath then
-			local Paths = require 'util.Paths'
+			local Paths = require 'ImmichPaths'
 			albumAssetsByLocalPath[Paths.foldForCompare(localPath)] = asset
 		end
 	end
 
-	local Paths = require 'util.Paths'
+	local Paths = require 'ImmichPaths'
 	local localAssetIdSet = newSet()
 	local localAssetIdToPhoto = {}
 	local collectionPhotosOutsideAlbum = {}   -- path-mapped LR photos not in album
