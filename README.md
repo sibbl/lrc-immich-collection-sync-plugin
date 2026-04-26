@@ -55,6 +55,12 @@ that old entry from the Plug-in Manager and add the current
 
 Then install `dist/lrc-immich-collection-sync-plugin.lrplugin/` in Lightroom via the Plugin Manager.
 
+Lightroom Classic embeds Lua 5.1 and can be picky about runtime module names.
+This plugin therefore keeps runtime-facing helper modules at the bundle root
+using simple names like `ImmichJSON.lua` and `ImmichPaths.lua`, while those
+wrappers explicitly load the real implementation files from `vendor/`, `util/`,
+and `ui/`.
+
 ## Limitations (on purpose)
 
 - No upload. No download. No metadata sync yet — see
