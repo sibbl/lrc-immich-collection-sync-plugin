@@ -13,7 +13,7 @@
 ]]
 
 local LrPrefs = import 'LrPrefs'
-local JSON = require 'vendor/JSON'
+local JSON = require 'vendor.JSON'
 
 local M = {}
 

@@ -25,9 +25,9 @@ local ImmichAPI = require 'ImmichAPI'
 local PathMapper = require 'PathMapper'
 local CatalogIndex = require 'CatalogIndex'
 local SyncEngine = require 'SyncEngine'
-local Paths = require 'util/Paths'
-local Errors = require 'util/Errors'
-local Dialogs = require 'ui/Dialogs'
+local Paths = require 'util.Paths'
+local Errors = require 'util.Errors'
+local Dialogs = require 'ui.Dialogs'
 
 LrFunctionContext.postAsyncTaskWithContext('ImmichSyncDialog', function(context)
 	if not Dialogs.requireCredentials() then return end
