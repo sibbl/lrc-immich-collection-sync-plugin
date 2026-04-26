@@ -35,6 +35,11 @@ or album.
    key and click **Test connection**.
 4. Add at least one path mapping — see [docs/path-mapping.md](docs/path-mapping.md).
 
+If Lightroom still shows errors mentioning `ImportConfiguration.lua` or
+`PluginInfo.lua`, it is still referencing the **old pre-v4 plugin**. Remove
+that old entry from the Plug-in Manager and add the current
+`lrc-immich-collection-sync-plugin.lrplugin` bundle again.
+
 ## Quick start menus
 
 - `Library > Plug-in Extras > Immich: Link selected collection to album…`
