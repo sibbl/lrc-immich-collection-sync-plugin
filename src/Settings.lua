@@ -5,6 +5,7 @@
     serverUrl            string
     apiKey               string
     pathMappings         string (JSON array of {immich, local_, label})
+	downloadFolder       string (last folder chosen for download+import fallback)
     collectionMappings   string (JSON object: collectionLocalId -> {albumId, albumName, serverUrl, linkedAt})
     logEnabled           boolean
 
@@ -41,6 +42,9 @@ function M.setApiKey(v) prefs().apiKey = v or '' end
 
 function M.getLogEnabled() return prefs().logEnabled and true or false end
 function M.setLogEnabled(v) prefs().logEnabled = v and true or false end
+
+function M.getDownloadFolder() return prefs().downloadFolder or '' end
+function M.setDownloadFolder(v) prefs().downloadFolder = v or '' end
 
 -- Path mappings -------------------------------------------------------------
 -- Returns an array of { immich, local_, label } tables.

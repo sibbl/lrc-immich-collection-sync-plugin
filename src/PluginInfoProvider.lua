@@ -19,6 +19,20 @@ local Logger = require 'Logger'
 local Errors = require 'Errors'
 
 local M = {}
+
+local INTERNAL_LIBRARY_ROOTS = {
+	{
+		name = 'Uploaded assets (all users, Docker /data)',
+		importPath = '/data/library/',
+		description = 'Maps Immich default uploaded/user libraries for current Docker installs.',
+	},
+	{
+		name = 'Uploaded assets (all users, legacy Docker)',
+		importPath = '/usr/src/app/upload/library/',
+		description = 'Maps Immich default uploaded/user libraries for older installs.',
+	},
+}
+
 -- Serialize path mappings to a human-editable multi-line text string so we
 -- can use a single text area widget rather than a complex dynamic table
 -- widget (LrView has no native table; doing it as rows-of-fields is brittle).
@@ -96,6 +110,19 @@ local function presentLibraryMappingDialog(context, f, libraries, currentMapping
 	local rows = {}
 	local rowCount = 0
 	local libCount = 0
+	for _, root in ipairs(INTERNAL_LIBRARY_ROOTS) do
+		rowCount = rowCount + 1
+		local key = 'row_' .. rowCount .. '_local'
+		props[key] = byImmich[root.importPath] or ''
+		table.insert(rows, {
+			lib = { name = root.name },
+			importPath = root.importPath,
+			key = key,
+			description = root.description,
+			isInternal = true,
+		})
+	end
+
 	for _, lib in ipairs(libraries or {}) do
 		libCount = libCount + 1
 		local paths = lib.importPaths or {}
@@ -117,8 +144,8 @@ local function presentLibraryMappingDialog(context, f, libraries, currentMapping
 
 	if rowCount == 0 then
 		LrDialogs.message('No libraries found',
-			'Immich returned no external libraries. Internal uploads still need a manual mapping ' ..
-			'(typically /usr/src/app/upload/library → your local mount).', 'info')
+			'Immich returned no external libraries. Add an uploaded-assets mapping manually ' ..
+			'(typically /data/library/ → your local UPLOAD_LOCATION/library folder).', 'info')
 		return nil
 	end
 
@@ -166,13 +193,17 @@ local function presentLibraryMappingDialog(context, f, libraries, currentMapping
 	local contents = f:column {
 		spacing = f:control_spacing(),
 		f:static_text {
-			title = ('Found %d librar%s with %d import path%s. ' ..
-				'For each Immich import path, set the same folder as Lightroom sees it. ' ..
+			title = ('Found %d external librar%s. Also showing common Immich uploaded-assets roots. ' ..
+				'For each Immich path, set the same folder as Lightroom sees it. ' ..
 				'No files are downloaded — both Immich and Lightroom point at the same physical files.'):format(
-				libCount, libCount == 1 and 'y' or 'ies',
-				rowCount, rowCount == 1 and '' or 's'),
+				libCount, libCount == 1 and 'y' or 'ies'),
 			width_in_chars = 100,
 			height_in_lines = 3,
+		},
+		f:static_text {
+			title = 'Tip: one /data/library/ mapping usually covers all uploaded user libraries and storage labels. Add per-user rows only as longer-prefix overrides when users are stored on different host paths.',
+			width_in_chars = 100,
+			height_in_lines = 2,
 		},
 		unpack(viewRows),
 	}

@@ -112,4 +112,20 @@ describe('ImmichAPI', function()
 		assertNil(libs)
 		assertEq(err.code, 'http_401')
 	end)
+
+	it('downloadAsset fetches original bytes with binary-friendly headers', function()
+		local http = fakeHttp{ { body = 'BINARY-DATA', headers = { status = 200 } } }
+		local api = ImmichAPI.new{ serverUrl = 'https://x', apiKey = 'k',
+			http = http, sleep = function() end }
+		local bytes, err = api:downloadAsset('ASSET')
+		assertNil(err)
+		assertEq(bytes, 'BINARY-DATA')
+		assertEq(http.calls[1].method, 'GET')
+		assertEq(http.calls[1].url, 'https://x/api/assets/ASSET/original')
+		local accept
+		for _, kv in ipairs(http.calls[1].headers) do
+			if kv.field == 'Accept' then accept = kv.value end
+		end
+		assertEq(accept, '*/*')
+	end)
 end)

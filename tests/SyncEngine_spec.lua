@@ -204,4 +204,39 @@ describe('SyncEngine.applyDiff', function()
 		assertEq(result.addedLocal, 1)
 		assertEq(collectionCalls.add[1], importedPhoto)
 	end)
+
+	it('downloads unmapped assets, saves them, imports them, then adds to the collection', function()
+		local importedPhoto = makePhoto('/downloads/a.jpg')
+		local downloadedAssetId
+		local savedEntry, savedBytes
+		local importedPaths
+		local collectionCalls = { add = {} }
+		local collectionMock = {
+			addPhotos = function(self, ps) collectionCalls.add = ps end,
+			removePhotos = function() end,
+		}
+		local result = SyncEngine.applyDiff({
+			toAddRemote = {}, toRemoveRemote = {},
+			toAddLocal = {}, toImportLocal = {},
+			toDownloadLocal = { { assetId = 'A', fileName = 'a.jpg', originalPath = '/data/library/u/a.jpg' } },
+			toRemoveLocal = {},
+		}, {
+			immichApi = {}, albumId = 'ALB', collection = collectionMock,
+			downloadAsset = function(assetId) downloadedAssetId = assetId; return 'BYTES', nil end,
+			saveDownloadedAsset = function(entry, bytes)
+				savedEntry = entry; savedBytes = bytes; return '/downloads/a.jpg', nil
+			end,
+			fileExists = function(path) return path == '/downloads/a.jpg' end,
+			importPhotos = function(paths) importedPaths = paths; return { importedPhoto } end,
+			withWriteAccess = function(_, fn) fn() end,
+		})
+		assertEq(downloadedAssetId, 'A')
+		assertEq(savedEntry.fileName, 'a.jpg')
+		assertEq(savedBytes, 'BYTES')
+		assertEq(importedPaths[1], '/downloads/a.jpg')
+		assertEq(result.downloadedLocal, 1)
+		assertEq(result.importedLocal, 1)
+		assertEq(result.addedLocal, 1)
+		assertEq(collectionCalls.add[1], importedPhoto)
+	end)
 end)

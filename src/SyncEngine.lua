@@ -22,6 +22,7 @@
       toRemoveRemote= { assetId… },            -- remove from Immich album
       toAddLocal    = { LrPhoto… },            -- add to LR collection
 			toImportLocal = { {assetId, localPath} … }, -- import file, then add to LR collection
+			toDownloadLocal = { {assetId, fileName, originalPath} … }, -- download, import, add
       toRemoveLocal = { LrPhoto… },            -- remove from LR collection
       warnings = {
         unmappableImmich = { {assetId, path, reason} … },
@@ -219,6 +220,8 @@ end
 --   albumId,          -- string
 --   collection,       -- LR collection with addPhotos/removePhotos
 --   importPhotos,     -- optional function(paths)->{LrPhoto…}; required for toImportLocal
+--   downloadAsset,    -- optional function(assetId)->bytes,err; required for toDownloadLocal
+--   saveDownloadedAsset, -- optional function(entry,bytes)->localPath,err
 --   fileExists,       -- optional function(path)->boolean
 --   withWriteAccess,  -- function(name, fn) wrapping LR mutations
 --   progress,         -- optional { setPortionComplete=f, isCanceled=f, setCaption=f }
@@ -231,7 +234,7 @@ function M.applyDiff(diff, deps)
 
 	local result = {
 		removedRemote = 0, addedRemote = 0,
-		removedLocal = 0,  addedLocal = 0, importedLocal = 0,
+		removedLocal = 0,  addedLocal = 0, importedLocal = 0, downloadedLocal = 0,
 		errors = {},
 	}
 	local progress = deps.progress
@@ -263,12 +266,60 @@ function M.applyDiff(diff, deps)
 	end
 
 	local toImportLocal = diff.toImportLocal or {}
-	if #diff.toAddLocal > 0 or #toImportLocal > 0 or #diff.toRemoveLocal > 0 then
+	local toDownloadLocal = diff.toDownloadLocal or {}
+	local downloadedImportEntries = {}
+
+	if #toDownloadLocal > 0 then
+		if step('Downloading unmapped Immich assets…') then return result end
+		if not deps.downloadAsset or not deps.saveDownloadedAsset then
+			table.insert(result.errors, {
+				op = 'local_download',
+				err = makeError('download_unavailable', 'Download/import functions were not provided'),
+			})
+		else
+			for _, entry in ipairs(toDownloadLocal) do
+				if progress and progress.isCanceled and progress.isCanceled() then return result end
+				local okDownload, bytes, downloadErr = pcall(deps.downloadAsset, entry.assetId)
+				if not okDownload then
+					table.insert(result.errors, {
+						op = 'local_download',
+						err = makeError('download_failed', tostring(bytes), entry),
+					})
+				elseif downloadErr or bytes == nil then
+					table.insert(result.errors, {
+						op = 'local_download',
+						err = downloadErr or makeError('download_failed', 'No data returned for asset ' .. tostring(entry.assetId), entry),
+					})
+				else
+					local ok, localPath, saveErr = pcall(deps.saveDownloadedAsset, entry, bytes)
+					if not ok then
+						table.insert(result.errors, {
+							op = 'local_download',
+							err = makeError('save_failed', tostring(localPath), entry),
+						})
+					elseif saveErr or not localPath then
+						table.insert(result.errors, {
+							op = 'local_download',
+							err = saveErr or makeError('save_failed', 'Could not save downloaded asset', entry),
+						})
+					else
+						result.downloadedLocal = result.downloadedLocal + 1
+						table.insert(downloadedImportEntries, {
+							assetId = entry.assetId,
+							localPath = localPath,
+						})
+					end
+				end
+			end
+		end
+	end
+
+	if #diff.toAddLocal > 0 or #toImportLocal > 0 or #downloadedImportEntries > 0 or #diff.toRemoveLocal > 0 then
 		if step('Updating Lightroom collection…') then return result end
 		deps.withWriteAccess('Immich sync', function()
 			local photosToAdd = {}
 
-			if #toImportLocal > 0 then
+			if #toImportLocal > 0 or #downloadedImportEntries > 0 then
 				local pathsToImport = {}
 				for _, entry in ipairs(toImportLocal) do
 					if fileExists(deps, entry.localPath) then
@@ -277,6 +328,16 @@ function M.applyDiff(diff, deps)
 						table.insert(result.errors, {
 							op = 'local_import',
 							err = makeError('file_missing', 'Local file is not accessible: ' .. tostring(entry.localPath), entry),
+						})
+					end
+				end
+				for _, entry in ipairs(downloadedImportEntries) do
+					if fileExists(deps, entry.localPath) then
+						table.insert(pathsToImport, entry.localPath)
+					else
+						table.insert(result.errors, {
+							op = 'local_import',
+							err = makeError('file_missing', 'Downloaded file is not accessible: ' .. tostring(entry.localPath), entry),
 						})
 					end
 				end

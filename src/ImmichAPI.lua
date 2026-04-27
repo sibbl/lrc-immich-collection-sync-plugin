@@ -75,14 +75,21 @@ function M:_headers(extraJson)
 	return h
 end
 
+function M:_downloadHeaders()
+	return {
+		{ field = 'x-api-key', value = self.apiKey },
+		{ field = 'Accept',    value = '*/*' },
+	}
+end
+
 -- Internal: run a request with retries. Returns (body, headers, err).
-function M:_request(method, path, body)
+function M:_request(method, path, body, headersOverride)
 	local url = self.serverUrl .. path
 	local attempts = 0
 	while true do
 		attempts = attempts + 1
 		local respBody, respHeaders = self.http.request(
-			method, url, self:_headers(body ~= nil), body)
+			method, url, headersOverride or self:_headers(body ~= nil), body)
 		local status = respHeaders and tonumber(respHeaders.status) or nil
 		-- Lightroom sometimes surfaces an `error` key on headers for network
 		-- failures rather than a status code.
@@ -165,6 +172,18 @@ function M:getAlbum(albumId)
 		'/api/albums/' .. albumId .. '?withoutAssets=false')
 	if err then return nil, err end
 	return decode(body), nil
+end
+
+-- Downloads the original asset bytes from GET /api/assets/{id}/original.
+-- The caller is responsible for writing the returned binary string to disk.
+function M:downloadAsset(assetId)
+	if assetId == nil or assetId == '' then
+		return nil, Errors.make('bad_request', 'assetId is required')
+	end
+	local body, _, err = self:_request('GET',
+		'/api/assets/' .. assetId .. '/original', nil, self:_downloadHeaders())
+	if err then return nil, err end
+	return body, nil
 end
 
 function M:addAssetsToAlbum(albumId, assetIds)

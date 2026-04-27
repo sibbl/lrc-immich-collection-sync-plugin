@@ -62,6 +62,7 @@ services are the wrong primitive for bidirectional workflows.
 | Fact | Source |
 | --- | --- |
 | `LrHttp.get(url, headers, timeout?)` returns `body, responseHeaders`. | SDK reference `LrHttp`. |
+| `LrHttp.get` can return binary response bodies; write downloaded Immich originals with `io.open(path, 'wb')` before importing via `catalog:addPhotos(paths)`. | Historical repo implementation: old `ImmichAPI.lua:downloadAsset` used `LrHttp.get`, and old `ImportServiceProvider.lua` wrote the returned bytes with `io.open(..., 'wb')`. |
 | `LrHttp.post(url, body, headers, method?, timeout?)` — the 4th arg is a verb override (`PUT`, `DELETE`, …). | bmachek `ImmichAPI.lua:784` uses `LrHttp.post(url, body, reqhdrs, 'PUT', 15)`. |
 | `headers` is an array of `{ field=..., value=... }` tables. | SDK reference. |
 | `responseHeaders.status` holds the HTTP status code; `responseHeaders.error` is set on network failure. | SDK reference. |

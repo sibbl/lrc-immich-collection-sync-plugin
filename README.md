@@ -3,8 +3,10 @@
 This repository builds the **Immich Sync** Lightroom Classic plugin.
 
 It keeps a **Lightroom collection** and an **Immich album** in sync **on demand**,
-in **either direction**, **without uploading, downloading, moving, or renaming
-photo files**.
+in **either direction**. Normally it does this by matching paths to the same
+files on disk, without uploading, moving, or renaming anything. If an Immich
+asset has no usable local path, you can explicitly confirm a fallback download
+and import during **Immich → Lightroom** sync.
 
 ## What this plugin does
 
@@ -15,11 +17,15 @@ photo files**.
 - Can import already-local files into the Lightroom catalog during
    **Immich → Lightroom** sync when the mapped file exists but is not in the
    catalog yet
+- Can optionally download unmapped Immich originals after confirmation, save
+   them to a folder you choose, import them into Lightroom, and remember that
+   folder for next time
 
 ## What this plugin does not do
 
 - No file upload
-- No file download
+- No automatic file download; downloads only happen after you confirm the
+   fallback during **Immich → Lightroom** sync
 - No metadata sync
 - No background/live sync
 - No automatic album or collection creation
@@ -33,10 +39,10 @@ You create the album in Immich and the collection in Lightroom, then link them.
 This plugin only works when **Immich and Lightroom can both see the same photo
 files**.
 
-Typical example:
+Typical current Immich Docker example:
 
-- Immich sees `/usr/src/app/upload/library/2024/IMG_0001.JPG`
-- Lightroom sees `/Volumes/photos/immich/library/2024/IMG_0001.JPG`
+- Immich sees `/data/library/sebastian/2024/IMG_0001.JPG`
+- Lightroom sees `/Volumes/photos/immich/library/sebastian/2024/IMG_0001.JPG`
 
 Those are the same file, just through different path prefixes. The plugin needs
 you to configure that translation once.
@@ -77,16 +83,27 @@ Then click **Test connection**.
 ### 2. Configure path mappings
 
 Use **Fetch libraries from Immich…** to import External Library paths from
-Immich and map them to the folders Lightroom sees locally.
+Immich and map them to the folders Lightroom sees locally. The dialog also
+shows common **uploaded/user library** roots because Immich's `/api/libraries`
+endpoint returns external libraries, not the default upload library.
 
-For internal Immich uploads, you may still need to add a manual mapping in the
-text area.
+For most Docker setups, one global mapping is enough for all users:
+
+```text
+uploaded | /data/library/ | /Volumes/photos/immich/library/
+```
+
+That covers paths such as `/data/library/sebastian/...` and
+`/data/library/another-user/...`. Add per-user rows only if different users or
+storage labels are physically stored under different host paths; longest-prefix
+matching lets those specific rows override the global one.
 
 The raw format is:
 
 ```text
 # Format: <label><TAB><immich prefix><TAB><local prefix>
-internal | /usr/src/app/upload/library/ | /Volumes/photos/immich/library/
+uploaded | /data/library/                | /Volumes/photos/immich/library/
+legacy   | /usr/src/app/upload/library/  | /Volumes/photos/immich/library/
 family   | /family/                     | /Volumes/family/
 ```
 
@@ -145,7 +162,10 @@ album.
 
 The plugin will only change album/collection membership. In **Immich → Lightroom**
 mode it may also import already-local mapped files into the Lightroom catalog so
-they can be added to the collection.
+they can be added to the collection. If some Immich assets are unmapped, the
+preview will warn you. After clicking **Apply**, the plugin asks whether to
+download those originals, lets you choose the destination folder, remembers that
+folder, imports the downloaded files, and adds them to the collection.
 
 ## Your current situation: empty album + empty collection
 
@@ -177,7 +197,9 @@ After linking, you have two normal ways to work:
 
 Result: the collection gets those photos added or removed to match the album.
 If an Immich asset maps to a local file that exists but is not in the Lightroom
-catalog yet, the plugin imports that existing file into the catalog first.
+catalog yet, the plugin imports that existing file into the catalog first. If an
+asset is unmapped, the plugin can download/import it only after you explicitly
+confirm the fallback and choose a save folder.
 
 ### If you want Lightroom to drive the album
 
@@ -210,6 +232,7 @@ Before applying, the plugin shows a summary such as:
 
 - items to add on one side
 - files to import into the Lightroom catalog, for **Immich → Lightroom**
+- unmapped Immich assets that can optionally be downloaded/imported after Apply
 - items to remove on one side
 - warnings
 

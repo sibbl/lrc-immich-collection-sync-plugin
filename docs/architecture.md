@@ -55,6 +55,10 @@ menu/LinkCollectionDialog.lua  menu/UnlinkAction.lua       menu/SyncDialog.lua
   direction with explicit warnings for unresolvable items. For
   **Immich → Lightroom**, mapped files that exist locally but are not in
   the Lightroom catalog become `toImportLocal` entries.
+- **SyncEngine.applyDiff** — injectable mutation step. It can also process
+  caller-approved `toDownloadLocal` entries by downloading asset bytes, saving
+  them outside the catalog write lock, importing the saved files, and adding the
+  imported photos to the Lightroom collection.
 
 ### LR-coupled
 
@@ -64,7 +68,9 @@ menu/LinkCollectionDialog.lua  menu/UnlinkAction.lua       menu/SyncDialog.lua
 - **menu/SyncDialog** — ties it all together: fetch album, build index,
   ask direction, preview, apply. It injects Lightroom file-existence checks
   and `catalog:addPhotos(paths)` so Immich→Lightroom can import existing
-  local files into the catalog before adding them to the collection.
+  local files into the catalog before adding them to the collection. When
+  unmapped Immich assets remain, it asks for explicit confirmation and a
+  destination folder before enabling the download/import fallback.
 - **Init.lua** — logger bootstrap only.
 
 ### Infrastructure
@@ -85,9 +91,10 @@ implement on top of Publish Services. See
 ## Why membership-only?
 
 Membership changes are cheap and deterministic: two finite ID sets, set
-difference in both directions. The only catalog import we perform is
+difference in both directions. The normal catalog import we perform is
 Lightroom registering an already-local mapped file during **Immich →
-Lightroom** sync. We still never copy, upload, download, or transform photo
-files. File transfer is a separate problem — it raises a whole universe of
-correctness questions (dedup, edit propagation, originals vs. renditions)
-that we deliberately defer. See [future/00-roadmap.md](future/00-roadmap.md).
+Lightroom** sync. Download/import is deliberately limited to an explicit
+fallback for unmapped assets after preview confirmation and destination-folder
+selection. We still do not upload, move, rename, transform, or continuously sync
+files. Broader file-transfer features remain out of scope. See
+[future/00-roadmap.md](future/00-roadmap.md).
