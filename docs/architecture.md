@@ -6,7 +6,7 @@
                       │  (PluginInfoProvider.lua) │
                       │                           │
                       │  • server URL / API key   │
-                      │  • path mappings (text)   │
+                      │  • path mappings (dialog) │
                       │  • enable logging         │
                       └────────────┬──────────────┘
                                    │ reads/writes
@@ -48,6 +48,9 @@ menu/LinkCollectionDialog.lua  menu/UnlinkAction.lua       menu/SyncDialog.lua
 - **CatalogIndex** — builds a `path → LrPhoto` map from a given list of
   photos. Caller injects case-folding. Caller passes photos; the LR
   catalog call lives outside the module.
+- **PathMappingChoices** — pure helpers for the Plugin Manager mapping dialog:
+  built-in upload roots, library importPaths, saved-only mappings, and the
+  read-only summary text.
 - **CatalogImport** — compatibility wrapper for importing existing local files
   into Lightroom. Uses `catalog:addPhotos(paths)` when available, otherwise
   falls back to the broadly-compatible `catalog:addPhoto(path)` loop.

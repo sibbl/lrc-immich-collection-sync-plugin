@@ -10,15 +10,12 @@ Three sections:
 
 1. **Immich Server** — Server URL, API key, "Test connection" button with
    inline status feedback.
-2. **Path Mappings** — free-form text area. One mapping per line, tab-
-   separated:
-   ```
-   label<TAB>immich-prefix<TAB>local-prefix
-   internal<TAB>/usr/src/app/upload/library/<TAB>/Volumes/nas/immich/library/
-   external-2024<TAB>/photos-2024/<TAB>/Volumes/photos/2024/
-   ```
-   Lines starting with `#` are ignored. Trailing slashes are normalized.
-   Longest prefix wins at lookup time. See [path-mapping.md](path-mapping.md).
+2. **Path Mappings** — browse-only chooser dialog. Click **Choose path
+  mappings…** to refresh Immich library paths when possible, then assign the
+  local folders Lightroom sees for each Immich path with **Choose…** and
+  **Clear** buttons. The Plugin Manager shows a read-only summary of the saved
+  mappings. Longest prefix wins at lookup time. See
+  [path-mapping.md](path-mapping.md).
 3. **Diagnostics** — enable debug logging, reveal the log file.
 
 ## Step 2 — Link a collection to an album (once per collection)

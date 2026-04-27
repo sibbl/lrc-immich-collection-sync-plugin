@@ -82,10 +82,11 @@ Then click **Test connection**.
 
 ### 2. Configure path mappings
 
-Use **Fetch libraries from Immich…** to import External Library paths from
-Immich and map them to the folders Lightroom sees locally. The dialog also
-shows common **uploaded/user library** roots because Immich's `/api/libraries`
-endpoint returns external libraries, not the default upload library.
+Use **Choose path mappings…** in the Plugin Manager. It refreshes External
+Library paths from Immich when your server settings are filled in, then opens a
+folder-chooser dialog. The dialog also shows common **uploaded/user library**
+roots because Immich's `/api/libraries` endpoint returns external libraries,
+not the default upload library.
 
 For most Docker setups, one global mapping is enough for all users:
 
@@ -98,22 +99,16 @@ That covers paths such as `/data/library/sebastian/...` and
 storage labels are physically stored under different host paths; longest-prefix
 matching lets those specific rows override the global one.
 
-The raw format is:
+In the dialog:
 
-```text
-# Format: <label><TAB><immich prefix><TAB><local prefix>
-uploaded | /data/library/                | /Volumes/photos/immich/library/
-legacy   | /usr/src/app/upload/library/  | /Volumes/photos/immich/library/
-family   | /family/                     | /Volumes/family/
-```
+- click **Choose…** to pick the local folder Lightroom sees for an Immich path
+- click **Clear** to remove a saved mapping
+- save when the rows look right; the Plugin Manager then shows a read-only
+   summary of the current mappings
 
-Notes:
-
-- One mapping per line
-- Use **literal tab characters** between columns in the Plugin Manager text area
-- Blank lines are ignored
-- Lines starting with `#` are ignored
-- The **longest matching prefix wins**
+The mapping logic is still the same under the hood: each saved entry is a
+`label + immich prefix + local prefix` triple, and the **longest matching
+prefix wins**.
 
 For more examples, see [`docs/path-mapping.md`](docs/path-mapping.md).
 
@@ -276,7 +271,7 @@ Check:
 
 - the Immich prefix is correct
 - the local prefix is the path Lightroom sees
-- the mapping uses tabs in the Plugin Manager text area
+- the correct local folder was chosen for that Immich path in the dialog
 - the files really exist locally at the mapped path
 
 ### Photos are in Immich but not in the Lightroom catalog yet

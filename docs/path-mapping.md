@@ -108,14 +108,14 @@ asset roots are not returned as external-library `importPaths`, so the dialog
 adds common uploaded/user-library roots itself.
 
 1. Open `File > Plug-in Manager… > Immich Sync`.
-2. In **Path Mappings**, click **Fetch libraries from Immich…**.
+2. In **Path Mappings**, click **Choose path mappings…**.
 3. The dialog lists common uploaded/user-library roots first, then every
-  external library and every `importPath`. For each row, either type the
-  matching local path or click **Browse…** to pick the folder Lightroom uses
-  for that same physical location.
-4. Click **Save mappings**. Resolved entries are merged into the existing
-   mappings (matched by Immich prefix); rows left blank are skipped so
-   you can configure libraries incrementally.
+  external library and every `importPath`, plus any previously saved mappings
+  that Immich is not currently reporting. For each row, click **Choose…** to
+  pick the folder Lightroom uses for that same physical location, or **Clear**
+  to remove the saved mapping.
+4. Click **Save mappings**. The Plugin Manager then shows a read-only summary of
+  the saved mappings.
 
 For current Docker installs, map `/data/library/` to the host folder behind
 `${UPLOAD_LOCATION}/library`. For older installs, map
