@@ -321,6 +321,9 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSyncDialog', function(context)
 		withWriteAccess = function(name, fn)
 			catalog:withWriteAccessDo(name, fn)
 		end,
+		yieldSafePcall = function(fn, ...)
+			return LrTasks.pcall(fn, ...)
+		end,
 		progress = {
 			setCaption = function(s) progress:setCaption(s) end,
 			isCanceled = function() return progress:isCanceled() end,

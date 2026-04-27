@@ -222,6 +222,7 @@ end
 --   importPhotos,     -- optional function(paths)->{LrPhoto…}; required for toImportLocal
 --   downloadAsset,    -- optional function(assetId)->bytes,err; required for toDownloadLocal
 --   saveDownloadedAsset, -- optional function(entry,bytes)->localPath,err
+--   yieldSafePcall,   -- optional function(func,...)->ok,... ; use LrTasks.pcall in LR runtime
 --   fileExists,       -- optional function(path)->boolean
 --   withWriteAccess,  -- function(name, fn) wrapping LR mutations
 --   progress,         -- optional { setPortionComplete=f, isCanceled=f, setCaption=f }
@@ -238,6 +239,7 @@ function M.applyDiff(diff, deps)
 		errors = {},
 	}
 	local progress = deps.progress
+	local yieldSafePcall = deps.yieldSafePcall or pcall
 
 	local function step(caption)
 		if progress and progress.setCaption then progress.setCaption(caption) end
@@ -279,7 +281,7 @@ function M.applyDiff(diff, deps)
 		else
 			for _, entry in ipairs(toDownloadLocal) do
 				if progress and progress.isCanceled and progress.isCanceled() then return result end
-				local okDownload, bytes, downloadErr = pcall(deps.downloadAsset, entry.assetId)
+				local okDownload, bytes, downloadErr = yieldSafePcall(deps.downloadAsset, entry.assetId)
 				if not okDownload then
 					table.insert(result.errors, {
 						op = 'local_download',
@@ -314,62 +316,60 @@ function M.applyDiff(diff, deps)
 		end
 	end
 
-	-- Import photos into the Lightroom catalog BEFORE entering
-	-- withWriteAccessDo. catalog:addPhoto is a yielding operation and
-	-- Lightroom does not allow yielding inside a write-access block.
-	local importedPhotos = {}
-	if #toImportLocal > 0 or #downloadedImportEntries > 0 then
-		if step('Importing files into Lightroom catalog…') then return result end
-		local pathsToImport = {}
-		for _, entry in ipairs(toImportLocal) do
-			if fileExists(deps, entry.localPath) then
-				table.insert(pathsToImport, entry.localPath)
-			else
-				table.insert(result.errors, {
-					op = 'local_import',
-					err = makeError('file_missing', 'Local file is not accessible: ' .. tostring(entry.localPath), entry),
-				})
-			end
+	local pathsToImport = {}
+	for _, entry in ipairs(toImportLocal) do
+		if fileExists(deps, entry.localPath) then
+			table.insert(pathsToImport, entry.localPath)
+		else
+			table.insert(result.errors, {
+				op = 'local_import',
+				err = makeError('file_missing', 'Local file is not accessible: ' .. tostring(entry.localPath), entry),
+			})
 		end
-		for _, entry in ipairs(downloadedImportEntries) do
-			if fileExists(deps, entry.localPath) then
-				table.insert(pathsToImport, entry.localPath)
-			else
-				table.insert(result.errors, {
-					op = 'local_import',
-					err = makeError('file_missing', 'Downloaded file is not accessible: ' .. tostring(entry.localPath), entry),
-				})
-			end
-		end
-
-		if #pathsToImport > 0 then
-			if not deps.importPhotos then
-				table.insert(result.errors, {
-					op = 'local_import',
-					err = makeError('import_unavailable', 'Lightroom catalog import function was not provided'),
-				})
-			else
-				local ok, importedOrErr = pcall(deps.importPhotos, pathsToImport)
-				if not ok then
-					table.insert(result.errors, {
-						op = 'local_import',
-						err = makeError('import_failed', tostring(importedOrErr)),
-					})
-				elseif importedOrErr then
-					for _, photo in ipairs(importedOrErr) do table.insert(importedPhotos, photo) end
-					result.importedLocal = #importedOrErr
-				end
-			end
+	end
+	for _, entry in ipairs(downloadedImportEntries) do
+		if fileExists(deps, entry.localPath) then
+			table.insert(pathsToImport, entry.localPath)
+		else
+			table.insert(result.errors, {
+				op = 'local_import',
+				err = makeError('file_missing', 'Downloaded file is not accessible: ' .. tostring(entry.localPath), entry),
+			})
 		end
 	end
 
-	-- Now do collection mutations inside write-access (non-yielding).
-	local needsWriteAccess = #diff.toAddLocal > 0 or #importedPhotos > 0
-		or #diff.toRemoveLocal > 0
+	-- Catalog imports must run inside withWriteAccessDo, but they may yield.
+	-- Therefore we keep them inside the write gate and use LrTasks.pcall (injected
+	-- as yieldSafePcall) instead of Lua's plain pcall.
+	local needsWriteAccess = #diff.toAddLocal > 0 or #pathsToImport > 0 or #diff.toRemoveLocal > 0
 	if needsWriteAccess then
-		if step('Updating Lightroom collection…') then return result end
+		if step(#pathsToImport > 0 and 'Importing files and updating Lightroom collection…' or 'Updating Lightroom collection…') then
+			return result
+		end
 		deps.withWriteAccess('Immich sync', function()
+			local importedPhotos = {}
 			local photosToAdd = {}
+
+			if #pathsToImport > 0 then
+				if not deps.importPhotos then
+					table.insert(result.errors, {
+						op = 'local_import',
+						err = makeError('import_unavailable', 'Lightroom catalog import function was not provided'),
+					})
+				else
+					local ok, importedOrErr = yieldSafePcall(deps.importPhotos, pathsToImport)
+					if not ok then
+						table.insert(result.errors, {
+							op = 'local_import',
+							err = makeError('import_failed', tostring(importedOrErr)),
+						})
+					elseif importedOrErr then
+						for _, photo in ipairs(importedOrErr) do table.insert(importedPhotos, photo) end
+						result.importedLocal = #importedOrErr
+					end
+				end
+			end
+
 			for _, photo in ipairs(importedPhotos) do table.insert(photosToAdd, photo) end
 			for _, photo in ipairs(diff.toAddLocal) do table.insert(photosToAdd, photo) end
 			if #photosToAdd > 0 then

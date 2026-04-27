@@ -184,6 +184,8 @@ describe('SyncEngine.applyDiff', function()
 	it('imports files into the LR catalog before adding them to the collection', function()
 		local importedPhoto = makePhoto('/nas/a.jpg')
 		local importedPaths
+		local usedYieldSafePcall = false
+		local insideWriteAccess = false
 		local collectionCalls = { add = {} }
 		local collectionMock = {
 			addPhotos = function(self, ps) collectionCalls.add = ps end,
@@ -196,10 +198,23 @@ describe('SyncEngine.applyDiff', function()
 		}, {
 			immichApi = {}, albumId = 'ALB', collection = collectionMock,
 			fileExists = function(path) return path == '/nas/a.jpg' end,
-			importPhotos = function(paths) importedPaths = paths; return { importedPhoto } end,
-			withWriteAccess = function(_, fn) fn() end,
+			importPhotos = function(paths)
+				assertEq(insideWriteAccess, true)
+				importedPaths = paths
+				return { importedPhoto }
+			end,
+			yieldSafePcall = function(fn, ...)
+				usedYieldSafePcall = true
+				return true, fn(...)
+			end,
+			withWriteAccess = function(_, fn)
+				insideWriteAccess = true
+				fn()
+				insideWriteAccess = false
+			end,
 		})
 		assertEq(importedPaths[1], '/nas/a.jpg')
+		assertEq(usedYieldSafePcall, true)
 		assertEq(result.importedLocal, 1)
 		assertEq(result.addedLocal, 1)
 		assertEq(collectionCalls.add[1], importedPhoto)

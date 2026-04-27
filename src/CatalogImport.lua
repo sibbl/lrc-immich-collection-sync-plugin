@@ -2,10 +2,13 @@
   CatalogImport — compatibility wrapper for importing existing local files into
   the Lightroom catalog.
 
-  Some Lightroom Classic runtimes expose LrCatalog:addPhoto(path), while
-  catalog:addPhotos(paths) is not consistently available. Keep the SDK-specific
-  probing here so menu code stays thin and SyncEngine can keep receiving a
-  simple importPhotos(paths) dependency.
+	Some Lightroom Classic runtimes expose LrCatalog:addPhoto(path), while
+	catalog:addPhotos(paths) is not consistently available. This helper must be
+	called from inside catalog:withWriteAccessDo(...) or a related write-access
+	gate; the SDK requires write access for catalog imports.
+
+	Keep the SDK-specific probing here so menu code stays thin and SyncEngine can
+	keep receiving a simple importPhotos(paths) dependency.
 ]]
 
 local M = {}
