@@ -13,7 +13,7 @@
 ]]
 
 local LrPrefs = import 'LrPrefs'
-local JSON = require 'ImmichJSON'
+local JSON = require 'JSON'
 
 local M = {}
 

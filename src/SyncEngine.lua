@@ -21,10 +21,11 @@
       toAddRemote   = { assetId… },            -- add to Immich album
       toRemoveRemote= { assetId… },            -- remove from Immich album
       toAddLocal    = { LrPhoto… },            -- add to LR collection
+			toImportLocal = { {assetId, localPath} … }, -- import file, then add to LR collection
       toRemoveLocal = { LrPhoto… },            -- remove from LR collection
       warnings = {
         unmappableImmich = { {assetId, path, reason} … },
-        missingLocal     = { {assetId, localPath} … },     -- mapped but no LrPhoto
+				missingLocal     = { {assetId, localPath} … },     -- mapped but inaccessible / unsafe
         unmappableLocal  = { {photoPath, reason} … },      -- LR photo outside any mapping
       },
       summary  = { addCount, removeCount, warningCount }
@@ -39,6 +40,16 @@ local M = {}
 local function newSet()  return {} end
 local function setAdd(s, v) s[v] = true end
 local function setHas(s, v) return s[v] == true end
+
+local function makeError(code, message, details)
+	return { code = code, message = message, details = details }
+end
+
+local function fileExists(opts, path)
+	if not opts.fileExists then return true end
+	local ok, exists = pcall(opts.fileExists, path)
+	return ok and exists and true or false
+end
 
 local function setDiff(a, b)
 	local out = {}
@@ -67,8 +78,11 @@ function M.computeDiff(opts)
 	-- Resolve Immich album assets → catalog photos keyed by assetId.
 	--   remoteAssetIdSet = set of assetIds that have a resolvable LrPhoto.
 	--   remoteAssetIdToPhoto = assetId -> LrPhoto.
+	--   remoteAssetIdToLocalPath = assetId -> local path for importable files
+	--     that are not in the Lightroom catalog yet.
 	local remoteAssetIdSet = newSet()
 	local remoteAssetIdToPhoto = {}
+	local remoteAssetIdToLocalPath = {}
 	for _, asset in ipairs(opts.albumAssets or {}) do
 		local localPath, reason = pathMapper:immichToLocal(asset.originalPath)
 		if not localPath then
@@ -78,9 +92,17 @@ function M.computeDiff(opts)
 		else
 			local photo = catalogIndex:lookup(localPath)
 			if not photo then
-				table.insert(warnings.missingLocal, {
-					assetId = asset.id, localPath = localPath,
-				})
+				if opts.direction == 'immich_to_lr' and fileExists(opts, localPath) then
+					remoteAssetIdToLocalPath[asset.id] = localPath
+				else
+					table.insert(warnings.missingLocal, {
+						assetId = asset.id,
+						localPath = localPath,
+						reason = opts.direction == 'immich_to_lr'
+							and 'mapped file is not accessible locally'
+							or 'asset is not in the Lightroom catalog',
+					})
+				end
 			else
 				setAdd(remoteAssetIdSet, asset.id)
 				remoteAssetIdToPhoto[asset.id] = photo
@@ -96,12 +118,12 @@ function M.computeDiff(opts)
 	for _, asset in ipairs(opts.albumAssets or {}) do
 		local localPath = pathMapper:immichToLocal(asset.originalPath)
 		if localPath then
-			local Paths = require 'ImmichPaths'
+			local Paths = require 'Paths'
 			albumAssetsByLocalPath[Paths.foldForCompare(localPath)] = asset
 		end
 	end
 
-	local Paths = require 'ImmichPaths'
+	local Paths = require 'Paths'
 	local localAssetIdSet = newSet()
 	local localAssetIdToPhoto = {}
 	local collectionPhotosOutsideAlbum = {}   -- path-mapped LR photos not in album
@@ -126,6 +148,7 @@ function M.computeDiff(opts)
 	local toAddRemote = {}
 	local toRemoveRemote = {}
 	local toAddLocal = {}
+	local toImportLocal = {}
 	local toRemoveLocal = {}
 
 	if opts.direction == 'lr_to_immich' then
@@ -149,6 +172,17 @@ function M.computeDiff(opts)
 		for _, assetId in ipairs(setDiff(remoteAssetIdSet, localAssetIdSet)) do
 			table.insert(toAddLocal, remoteAssetIdToPhoto[assetId])
 		end
+		-- Import files that exist locally but are not in the Lightroom catalog yet,
+		-- then add the imported LrPhoto objects to the collection during apply.
+		local importAssetIds = {}
+		for assetId in pairs(remoteAssetIdToLocalPath) do table.insert(importAssetIds, assetId) end
+		table.sort(importAssetIds)
+		for _, assetId in ipairs(importAssetIds) do
+			table.insert(toImportLocal, {
+				assetId = assetId,
+				localPath = remoteAssetIdToLocalPath[assetId],
+			})
+		end
 		-- Remove from LR collection every photo that is not in the album
 		-- (and whose path is mapped; unmappable ones are warnings, not deletions).
 		for _, photo in ipairs(collectionPhotosOutsideAlbum) do
@@ -165,10 +199,11 @@ function M.computeDiff(opts)
 		toAddRemote = toAddRemote,
 		toRemoveRemote = toRemoveRemote,
 		toAddLocal = toAddLocal,
+		toImportLocal = toImportLocal,
 		toRemoveLocal = toRemoveLocal,
 		warnings = warnings,
 		summary = {
-			addCount = #toAddRemote + #toAddLocal,
+			addCount = #toAddRemote + #toAddLocal + #toImportLocal,
 			removeCount = #toRemoveRemote + #toRemoveLocal,
 			warningCount = warningCount,
 		},
@@ -183,6 +218,8 @@ end
 --   immichApi,        -- ImmichAPI instance
 --   albumId,          -- string
 --   collection,       -- LR collection with addPhotos/removePhotos
+--   importPhotos,     -- optional function(paths)->{LrPhoto…}; required for toImportLocal
+--   fileExists,       -- optional function(path)->boolean
 --   withWriteAccess,  -- function(name, fn) wrapping LR mutations
 --   progress,         -- optional { setPortionComplete=f, isCanceled=f, setCaption=f }
 -- }
@@ -194,7 +231,7 @@ function M.applyDiff(diff, deps)
 
 	local result = {
 		removedRemote = 0, addedRemote = 0,
-		removedLocal = 0,  addedLocal = 0,
+		removedLocal = 0,  addedLocal = 0, importedLocal = 0,
 		errors = {},
 	}
 	local progress = deps.progress
@@ -225,12 +262,50 @@ function M.applyDiff(diff, deps)
 		end
 	end
 
-	if #diff.toAddLocal > 0 or #diff.toRemoveLocal > 0 then
+	local toImportLocal = diff.toImportLocal or {}
+	if #diff.toAddLocal > 0 or #toImportLocal > 0 or #diff.toRemoveLocal > 0 then
 		if step('Updating Lightroom collection…') then return result end
 		deps.withWriteAccess('Immich sync', function()
-			if #diff.toAddLocal > 0 then
-				deps.collection:addPhotos(diff.toAddLocal)
-				result.addedLocal = #diff.toAddLocal
+			local photosToAdd = {}
+
+			if #toImportLocal > 0 then
+				local pathsToImport = {}
+				for _, entry in ipairs(toImportLocal) do
+					if fileExists(deps, entry.localPath) then
+						table.insert(pathsToImport, entry.localPath)
+					else
+						table.insert(result.errors, {
+							op = 'local_import',
+							err = makeError('file_missing', 'Local file is not accessible: ' .. tostring(entry.localPath), entry),
+						})
+					end
+				end
+
+				if #pathsToImport > 0 then
+					if not deps.importPhotos then
+						table.insert(result.errors, {
+							op = 'local_import',
+							err = makeError('import_unavailable', 'Lightroom catalog import function was not provided'),
+						})
+					else
+						local ok, importedOrErr = pcall(deps.importPhotos, pathsToImport)
+						if not ok then
+							table.insert(result.errors, {
+								op = 'local_import',
+								err = makeError('import_failed', tostring(importedOrErr)),
+							})
+						elseif importedOrErr then
+							for _, photo in ipairs(importedOrErr) do table.insert(photosToAdd, photo) end
+							result.importedLocal = #importedOrErr
+						end
+					end
+				end
+			end
+
+			for _, photo in ipairs(diff.toAddLocal) do table.insert(photosToAdd, photo) end
+			if #photosToAdd > 0 then
+				deps.collection:addPhotos(photosToAdd)
+				result.addedLocal = #photosToAdd
 			end
 			if #diff.toRemoveLocal > 0 then
 				deps.collection:removePhotos(diff.toRemoveLocal)

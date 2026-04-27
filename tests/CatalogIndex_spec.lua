@@ -1,5 +1,5 @@
 local CatalogIndex = require 'CatalogIndex'
-local Paths = require 'util.Paths'
+local Paths = require 'Paths'
 
 local function makePhoto(path)
 	return { getRawMetadata = function(_, key) if key == 'path' then return path end end }

@@ -1,7 +1,7 @@
 local SyncEngine = require 'SyncEngine'
 local PathMapper = require 'PathMapper'
 local CatalogIndex = require 'CatalogIndex'
-local Paths = require 'util.Paths'
+local Paths = require 'Paths'
 
 local function fold(p) return Paths.foldForCompare(p) end
 
@@ -41,6 +41,37 @@ describe('SyncEngine.computeDiff', function()
 		assertEq(d.toAddLocal[1]._path, '/nas/a.jpg')
 		assertEq(#d.toRemoveLocal, 1)
 		assertEq(d.toRemoveLocal[1]._path, '/nas/b.jpg')
+	end)
+
+	it('immich->lr imports mapped files that are not in the catalog yet', function()
+		local env = makeEnv(
+			{ { id = 'A', originalPath = '/upload/a.jpg' } },
+			{},
+			{}
+		)
+		env.direction = 'immich_to_lr'
+		env.fileExists = function(path) return path == '/nas/a.jpg' end
+		local d = SyncEngine.computeDiff(env)
+		assertEq(#d.toAddLocal, 0)
+		assertEq(#d.toImportLocal, 1)
+		assertEq(d.toImportLocal[1].assetId, 'A')
+		assertEq(d.toImportLocal[1].localPath, '/nas/a.jpg')
+		assertEq(d.summary.addCount, 1)
+		assertEq(#d.warnings.missingLocal, 0)
+	end)
+
+	it('immich->lr warns when a mapped file is not accessible locally', function()
+		local env = makeEnv(
+			{ { id = 'A', originalPath = '/upload/a.jpg' } },
+			{},
+			{}
+		)
+		env.direction = 'immich_to_lr'
+		env.fileExists = function() return false end
+		local d = SyncEngine.computeDiff(env)
+		assertEq(#d.toImportLocal, 0)
+		assertEq(#d.warnings.missingLocal, 1)
+		assertEq(d.warnings.missingLocal[1].localPath, '/nas/a.jpg')
 	end)
 
 	it('lr->immich removes album assets that are not in the collection', function()
@@ -148,5 +179,29 @@ describe('SyncEngine.applyDiff', function()
 		})
 		assertEq(#result.errors, 1)
 		assertEq(result.errors[1].op, 'remote_add')
+	end)
+
+	it('imports files into the LR catalog before adding them to the collection', function()
+		local importedPhoto = makePhoto('/nas/a.jpg')
+		local importedPaths
+		local collectionCalls = { add = {} }
+		local collectionMock = {
+			addPhotos = function(self, ps) collectionCalls.add = ps end,
+			removePhotos = function() end,
+		}
+		local result = SyncEngine.applyDiff({
+			toAddRemote = {}, toRemoveRemote = {},
+			toAddLocal = {}, toImportLocal = { { assetId = 'A', localPath = '/nas/a.jpg' } },
+			toRemoveLocal = {},
+		}, {
+			immichApi = {}, albumId = 'ALB', collection = collectionMock,
+			fileExists = function(path) return path == '/nas/a.jpg' end,
+			importPhotos = function(paths) importedPaths = paths; return { importedPhoto } end,
+			withWriteAccess = function(_, fn) fn() end,
+		})
+		assertEq(importedPaths[1], '/nas/a.jpg')
+		assertEq(result.importedLocal, 1)
+		assertEq(result.addedLocal, 1)
+		assertEq(collectionCalls.add[1], importedPhoto)
 	end)
 end)

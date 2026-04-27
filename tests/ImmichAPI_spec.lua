@@ -1,4 +1,4 @@
-local JSON = require 'vendor.JSON'
+local JSON = require 'JSON'
 
 -- Build a fake HTTP adapter so ImmichAPI can be tested without LrHttp.
 local function fakeHttp(responses)

@@ -1,5 +1,5 @@
 local PathMapper = require 'PathMapper'
-local Paths = require 'util.Paths'
+local Paths = require 'Paths'
 
 describe('PathMapper', function()
 	it('translates Immich paths to local paths with longest prefix match', function()

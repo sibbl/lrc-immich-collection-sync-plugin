@@ -6,13 +6,46 @@
 
 local M = {}
 
--- OS detection without LrSystemInfo so the module works in headless tests.
+-- OS detection must work both in headless tests and inside Lightroom's Lua
+-- sandbox. Lightroom can hide standard globals such as `package`, so every
+-- probe is guarded. Tests can still override the detected value via _setOS().
 local function detectOS()
-	local sep = package.config:sub(1, 1)
-	if sep == '\\' then return 'windows' end
+	if package and package.config then
+		local sep = package.config:sub(1, 1)
+		if sep == '\\' then return 'windows' end
+	end
+
+	if type(import) == 'function' then
+		local ok, LrSystemInfo = pcall(import, 'LrSystemInfo')
+		if ok and LrSystemInfo then
+			local candidates = {}
+			if type(LrSystemInfo.osVersion) == 'function' then
+				local okVersion, version = pcall(LrSystemInfo.osVersion)
+				if okVersion and version then table.insert(candidates, tostring(version)) end
+			end
+			if type(LrSystemInfo.summaryString) == 'function' then
+				local okSummary, summary = pcall(LrSystemInfo.summaryString)
+				if okSummary and summary then table.insert(candidates, tostring(summary)) end
+			end
+			for _, s in ipairs(candidates) do
+				local lower = s:lower()
+				if lower:match('windows') then return 'windows' end
+				if lower:match('mac') or lower:match('darwin') then return 'macos' end
+			end
+		end
+	end
+
 	-- Heuristic: Darwin exposes /System directory, Linux does not.
-	local f = io.open('/System/Library/CoreServices/SystemVersion.plist', 'r')
-	if f then f:close(); return 'macos' end
+	if io and io.open then
+		local f = io.open('/System/Library/CoreServices/SystemVersion.plist', 'r')
+		if f then f:close(); return 'macos' end
+	end
+
+	-- Lightroom Classic only runs on macOS/Windows. If we got here inside a
+	-- heavily sandboxed Lightroom runtime, macOS-style case-insensitive matching
+	-- is the safer default than Linux-style strictness.
+	if type(import) == 'function' then return 'macos' end
+
 	return 'linux'
 end
 

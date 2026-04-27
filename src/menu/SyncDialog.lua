@@ -18,6 +18,7 @@ local LrView = import 'LrView'
 local LrBinding = import 'LrBinding'
 local LrProgressScope = import 'LrProgressScope'
 local LrPrefs = import 'LrPrefs'
+local LrFileUtils = import 'LrFileUtils'
 
 local Settings = require 'Settings'
 local MappingStore = require 'MappingStore'
@@ -25,9 +26,9 @@ local ImmichAPI = require 'ImmichAPI'
 local PathMapper = require 'PathMapper'
 local CatalogIndex = require 'CatalogIndex'
 local SyncEngine = require 'SyncEngine'
-local Paths = require 'ImmichPaths'
-local Errors = require 'ImmichErrors'
-local Dialogs = require 'ImmichDialogs'
+local Paths = require 'Paths'
+local Errors = require 'Errors'
+local Dialogs = require 'Dialogs'
 
 LrFunctionContext.postAsyncTaskWithContext('ImmichSyncDialog', function(context)
 	if not Dialogs.requireCredentials() then return end
@@ -110,6 +111,7 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSyncDialog', function(context)
 		albumAssets = album.assets or {},
 		pathMapper = pathMapper,
 		catalogIndex = catalogIndex,
+		fileExists = function(path) return LrFileUtils.exists(path) end,
 	}
 
 	-- Preview.
@@ -122,7 +124,8 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSyncDialog', function(context)
 		addLine(('Add to Immich album:    %d'):format(#diff.toAddRemote))
 		addLine(('Remove from Immich album: %d'):format(#diff.toRemoveRemote))
 	else
-		addLine(('Add to Lightroom collection:    %d'):format(#diff.toAddLocal))
+		addLine(('Import into Lightroom catalog:   %d'):format(#(diff.toImportLocal or {})))
+		addLine(('Add to Lightroom collection:    %d'):format(#diff.toAddLocal + #(diff.toImportLocal or {})))
 		addLine(('Remove from Lightroom collection: %d'):format(#diff.toRemoveLocal))
 	end
 	addLine('')
@@ -160,6 +163,10 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSyncDialog', function(context)
 		immichApi = api,
 		albumId = link.albumId,
 		collection = collection,
+		fileExists = function(path) return LrFileUtils.exists(path) end,
+		importPhotos = function(paths)
+			return catalog:addPhotos(paths)
+		end,
 		withWriteAccess = function(name, fn)
 			catalog:withWriteAccessDo(name, fn)
 		end,
@@ -173,6 +180,7 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSyncDialog', function(context)
 	local lines = {
 		('Added to Immich:     %d'):format(result.addedRemote),
 		('Removed from Immich: %d'):format(result.removedRemote),
+		('Imported to LR:      %d'):format(result.importedLocal or 0),
 		('Added to LR:         %d'):format(result.addedLocal),
 		('Removed from LR:     %d'):format(result.removedLocal),
 	}

@@ -1,6 +1,6 @@
 # Architecture
 
-```
+```text
                       ┌───────────────────────────┐
                       │  Plugin Manager settings  │
                       │  (PluginInfoProvider.lua) │
@@ -39,6 +39,7 @@ menu/LinkCollectionDialog.lua  menu/UnlinkAction.lua       menu/SyncDialog.lua
 ## Module responsibilities
 
 ### Pure, unit-testable
+
 - **PathMapper** — translates Immich ↔ local paths by longest-prefix match.
   Host-OS case-folding policy. No globals, no I/O.
 - **MappingStore** — CRUD over a JSON blob in `LrPrefs` keyed by LR
@@ -51,17 +52,23 @@ menu/LinkCollectionDialog.lua  menu/UnlinkAction.lua       menu/SyncDialog.lua
   `http` transport and `sleep` function, making retry/backoff testable.
 - **SyncEngine.computeDiff** — pure. Given collection photos, album
   assets, a PathMapper, and a CatalogIndex, returns a diff for the chosen
-  direction with explicit warnings for unresolvable items.
+  direction with explicit warnings for unresolvable items. For
+  **Immich → Lightroom**, mapped files that exist locally but are not in
+  the Lightroom catalog become `toImportLocal` entries.
 
 ### LR-coupled
+
 - **PluginInfoProvider** — Plugin Manager UI.
 - **menu/LinkCollectionDialog** — album-picker + persist mapping.
 - **menu/UnlinkAction** — remove mapping.
 - **menu/SyncDialog** — ties it all together: fetch album, build index,
-  ask direction, preview, apply.
+  ask direction, preview, apply. It injects Lightroom file-existence checks
+  and `catalog:addPhotos(paths)` so Immich→Lightroom can import existing
+  local files into the catalog before adding them to the collection.
 - **Init.lua** — logger bootstrap only.
 
 ### Infrastructure
+
 - **util/Paths** — pure path helpers. Tested.
 - **util/Logger** — thin LrLogger wrapper.
 - **util/Errors** — structured error type + renderer.
@@ -78,7 +85,9 @@ implement on top of Publish Services. See
 ## Why membership-only?
 
 Membership changes are cheap and deterministic: two finite ID sets, set
-difference in both directions. File transfer is not — it raises a whole
-universe of correctness questions (dedup, re-imports, edit propagation,
-originals vs. renditions) that we deliberately defer. See
-[future/00-roadmap.md](future/00-roadmap.md).
+difference in both directions. The only catalog import we perform is
+Lightroom registering an already-local mapped file during **Immich →
+Lightroom** sync. We still never copy, upload, download, or transform photo
+files. File transfer is a separate problem — it raises a whole universe of
+correctness questions (dedup, edit propagation, originals vs. renditions)
+that we deliberately defer. See [future/00-roadmap.md](future/00-roadmap.md).

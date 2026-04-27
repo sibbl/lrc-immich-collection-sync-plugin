@@ -20,7 +20,7 @@ official documentation is silent.
 | --- | --- |
 | Lightroom Classic embeds Lua **5.1** | Adobe SDK Guide; also confirmed by lack of 5.2+ features in every reference plugin. |
 | Plugins are loaded from a folder named `*.lrplugin` containing `Info.lua`. | Adobe SDK Guide §2. |
-| `_PLUGIN.path` is the plugin root and is added to `package.path`, so `require 'util.Paths'` resolves to `<plugin>/util/Paths.lua`. | Standard Lua 5.1 behavior + `_PLUGIN` global documented in SDK reference. |
+| In practice, Lightroom's plugin loader is stricter than plain Lua: keep runtime `require` names simple and root-level (`require 'JSON'`, `require 'Paths'`). Do not rely on `package` being available at runtime. | Observed in Lightroom Classic during this rewrite; old working plugin also used flat root-level modules. |
 
 ## Info.lua keys
 
@@ -42,6 +42,7 @@ official documentation is silent.
 | `photo:getRawMetadata('path')` returns the absolute file path. | SDK reference `LrPhoto`. |
 | There is **no** `findPhotoByPath` method. Build your own index. | Reverse-engineered: no occurrence in any reference plugin; confirmed absent in SDK reference. |
 | Any catalog mutation **must** be inside `catalog:withWriteAccessDo(name, fn)`. | SDK reference `LrCatalog`; used pervasively in bmachek `PublishTask.lua`. |
+| `catalog:addPhoto(path)` / `catalog:addPhotos(paths)` imports existing local files into the Lightroom catalog. | Historical repo implementations: old `ImportServiceProvider.lua` used `catalog:addPhoto(destinationPath)`, old `SyncServiceProvider.lua` used `catalog:addPhotos(photosToAdd)`. |
 | `collection:addPhotos(photos)` / `:removePhotos(photos)` are idempotent. | SDK reference `LrCollection`. |
 | `catalog:getActiveSources()` returns currently-selected sidebar sources (folders, collections, sets). Filter by `src:type() == 'LrCollection'`. | SDK reference `LrCatalog`. |
 

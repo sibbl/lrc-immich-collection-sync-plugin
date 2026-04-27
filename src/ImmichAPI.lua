@@ -14,8 +14,8 @@
       maxRetries (optional) defaults to 3
 ]]
 
-local Errors = require 'ImmichErrors'
-local JSON = require 'ImmichJSON'
+local Errors = require 'Errors'
+local JSON = require 'JSON'
 
 local M = {}
 M.__index = M

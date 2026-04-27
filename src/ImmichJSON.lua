@@ -1,1 +1,0 @@
-return require('ImmichAliasLoader').load('vendor/JSON.lua')

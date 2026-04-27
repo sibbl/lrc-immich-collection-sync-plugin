@@ -17,8 +17,8 @@ local LrBinding = import 'LrBinding'
 local Settings = require 'Settings'
 local MappingStore = require 'MappingStore'
 local ImmichAPI = require 'ImmichAPI'
-local Dialogs = require 'ImmichDialogs'
-local Errors = require 'ImmichErrors'
+local Dialogs = require 'Dialogs'
+local Errors = require 'Errors'
 local LrPrefs = import 'LrPrefs'
 
 LrFunctionContext.postAsyncTaskWithContext('ImmichLinkCollection', function(context)

@@ -1,89 +1,300 @@
-# lrc-immich-collection-sync-plugin
+# Immich Sync for Lightroom Classic
 
-`lrc-immich-collection-sync-plugin` is the repository/project name.
-The Lightroom Classic plugin it builds is still called **Immich Sync**.
+This repository builds the **Immich Sync** Lightroom Classic plugin.
 
-Keep a Lightroom Classic collection in sync with an Immich album — both
-directions, on demand, **without ever moving photo files**. Both sides
-are expected to see the same files on disk, and you tell the plugin how
-Immich's paths relate to your host paths.
+It keeps a **Lightroom collection** and an **Immich album** in sync **on demand**,
+in **either direction**, **without uploading, downloading, moving, or renaming
+photo files**.
 
-## The goal in one sentence
+## What this plugin does
 
-> Manage albums in Immich all year, come back to Lightroom, and have
-> those albums available as collections you can sync in either direction.
+- Syncs **membership only** between a Lightroom collection and an Immich album
+- Works in both directions: **Immich → Lightroom** and **Lightroom → Immich**
+- Uses **path mappings** to match the same physical files as seen by Immich and
+  Lightroom
+- Can import already-local files into the Lightroom catalog during
+   **Immich → Lightroom** sync when the mapped file exists but is not in the
+   catalog yet
 
-## How it works
+## What this plugin does not do
 
-1. Enter your Immich server URL, API key, and path-prefix mappings
-   (Immich path prefix → local path prefix) in the Plugin Manager.
-2. Select a Lightroom collection, pick an Immich album, and link them.
-3. Open **Library > Plug-in Extras > Immich: Sync…**, choose a direction
-   (LR→Immich or Immich→LR), review the preview, and apply.
+- No file upload
+- No file download
+- No metadata sync
+- No background/live sync
+- No automatic album or collection creation
+- No file copying during catalog import; Lightroom is pointed at the existing
+   mapped file
 
-The plugin **never** uploads, downloads, renames, or deletes any photo
-file. It only edits *membership*: which photos are in which collection
-or album.
+You create the album in Immich and the collection in Lightroom, then link them.
+
+## Before you start
+
+This plugin only works when **Immich and Lightroom can both see the same photo
+files**.
+
+Typical example:
+
+- Immich sees `/usr/src/app/upload/library/2024/IMG_0001.JPG`
+- Lightroom sees `/Volumes/photos/immich/library/2024/IMG_0001.JPG`
+
+Those are the same file, just through different path prefixes. The plugin needs
+you to configure that translation once.
 
 ## Install
 
-1. Build the plugin (see below) or download `lrc-immich-collection-sync-plugin.lrplugin` from
-   a CI release artifact.
-2. In Lightroom Classic: `File > Plug-in Manager… > Add`, then select
-   the `lrc-immich-collection-sync-plugin.lrplugin` folder.
-3. In the Plugin Manager under **Immich Sync**, enter server URL + API
-   key and click **Test connection**.
-4. Add at least one path mapping — see [docs/path-mapping.md](docs/path-mapping.md).
-
-If Lightroom still shows errors mentioning `ImportConfiguration.lua` or
-`PluginInfo.lua`, it is still referencing the **old pre-v4 plugin**. Remove
-that old entry from the Plug-in Manager and add the current
-`lrc-immich-collection-sync-plugin.lrplugin` bundle again.
-
-## Quick start menus
-
-- `Library > Plug-in Extras > Immich: Link selected collection to album…`
-- `Library > Plug-in Extras > Immich: Sync…`
-- `Library > Plug-in Extras > Immich: Unlink selected collection`
-
-## Build from source
+### Build from source
 
 ```sh
-./test.sh          # run unit tests (needs luajit or lua5.1)
-./build.sh         # produces dist/lrc-immich-collection-sync-plugin.lrplugin/
+./test.sh
+./build.sh
 ```
 
-Then install `dist/lrc-immich-collection-sync-plugin.lrplugin/` in Lightroom via the Plugin Manager.
+That produces:
 
-Lightroom Classic embeds Lua 5.1 and can be picky about runtime module names.
-This plugin therefore keeps runtime-facing helper modules at the bundle root
-using simple names like `ImmichJSON.lua` and `ImmichPaths.lua`, while those
-wrappers explicitly load the real implementation files from `vendor/`, `util/`,
-and `ui/`.
+`dist/lrc-immich-collection-sync-plugin.lrplugin/`
 
-## Limitations (on purpose)
+### Add the plugin to Lightroom Classic
 
-- No upload. No download. No metadata sync yet — see
-  [docs/future/01-metadata-sync.md](docs/future/01-metadata-sync.md).
-- Smart collections are rejected: their membership is derived from
-  rules, so "adding" a photo is a category error.
-- The API key is stored in Lightroom preferences in plaintext. SDK 3.0
-  does not offer a reliable encrypted-storage API.
+1. Open **File > Plug-in Manager…**
+2. Click **Add**
+3. Select `dist/lrc-immich-collection-sync-plugin.lrplugin`
+
+If Lightroom still shows errors from an older version of the plugin, remove the
+old plugin entry from Plug-in Manager and add the new bundle again.
+
+## Configure the plugin
+
+Open **File > Plug-in Manager…** and select **Immich Sync**.
+
+### 1. Enter server settings
+
+- **Immich server URL**
+- **API key**
+
+Then click **Test connection**.
+
+### 2. Configure path mappings
+
+Use **Fetch libraries from Immich…** to import External Library paths from
+Immich and map them to the folders Lightroom sees locally.
+
+For internal Immich uploads, you may still need to add a manual mapping in the
+text area.
+
+The raw format is:
+
+```text
+# Format: <label><TAB><immich prefix><TAB><local prefix>
+internal | /usr/src/app/upload/library/ | /Volumes/photos/immich/library/
+family   | /family/                     | /Volumes/family/
+```
+
+Notes:
+
+- One mapping per line
+- Use **literal tab characters** between columns in the Plugin Manager text area
+- Blank lines are ignored
+- Lines starting with `#` are ignored
+- The **longest matching prefix wins**
+
+For more examples, see [`docs/path-mapping.md`](docs/path-mapping.md).
+
+## How to use it
+
+### Menu entries
+
+All actions live under `Library > Plug-in Extras`.
+
+- **Immich: Link selected collection to album…**
+- **Immich: Sync…**
+- **Immich: Unlink selected collection**
+
+## First-time workflow
+
+### Step 1: Create or choose a normal Lightroom collection
+
+Select a **regular collection** in Lightroom.
+
+Smart collections are not supported.
+
+### Step 2: Create or choose an album in Immich
+
+Create the target album in Immich if it does not already exist.
+
+### Step 3: Link the collection to the album
+
+1. Select the collection in Lightroom
+2. Open **Library > Plug-in Extras > Immich: Link selected collection to album…**
+3. Pick the Immich album
+4. Click **Link**
+
+This stores the relationship between that Lightroom collection and that Immich
+album.
+
+### Step 4: Run a sync
+
+1. Select the linked collection
+2. Open **Library > Plug-in Extras > Immich: Sync…**
+3. Choose a direction:
+   - **Immich → Lightroom** = make the collection match the album
+   - **Lightroom → Immich** = make the album match the collection
+4. Click **Analyze**
+5. Review the preview
+6. Click **Apply**
+
+The plugin will only change album/collection membership. In **Immich → Lightroom**
+mode it may also import already-local mapped files into the Lightroom catalog so
+they can be added to the collection.
+
+## Your current situation: empty album + empty collection
+
+You’re already most of the way there 🎯
+
+If you have:
+
+- an **empty album** in Immich
+- an **empty collection** in Lightroom
+- working connection + path mapping
+
+then the next step is:
+
+1. Select the Lightroom collection
+2. Use **Immich: Link selected collection to album…**
+3. Choose the album you created in Immich
+4. Use **Immich: Sync…**
+
+If **both sides are still empty**, sync will do nothing — which is correct.
+
+After linking, you have two normal ways to work:
+
+### If you want Immich to drive the collection
+
+1. Add photos to the album in Immich
+2. In Lightroom, select the linked collection
+3. Run **Immich: Sync…**
+4. Choose **Immich → Lightroom**
+
+Result: the collection gets those photos added or removed to match the album.
+If an Immich asset maps to a local file that exists but is not in the Lightroom
+catalog yet, the plugin imports that existing file into the catalog first.
+
+### If you want Lightroom to drive the album
+
+1. Add photos to the Lightroom collection
+2. In Lightroom, select the linked collection
+3. Run **Immich: Sync…**
+4. Choose **Lightroom → Immich**
+
+Result: the Immich album gets those assets added or removed to match the
+collection.
+
+## Day-to-day usage
+
+This plugin is **on demand**, not automatic.
+
+Typical workflow:
+
+1. Make changes on one side
+2. Select the linked Lightroom collection
+3. Run **Immich: Sync…**
+4. Choose which side should win for this run
+5. Review the preview
+6. Apply
+
+You can re-run sync whenever you want.
+
+## What the preview means
+
+Before applying, the plugin shows a summary such as:
+
+- items to add on one side
+- files to import into the Lightroom catalog, for **Immich → Lightroom**
+- items to remove on one side
+- warnings
+
+Warnings are important. Common ones are:
+
+- **unmapped Immich path** — no path mapping matches an Immich asset path
+- **missing locally** — the mapped local file is not available to Lightroom
+- **LR photo outside any mapping** — a Lightroom photo is not under a configured
+   local prefix
+
+Nothing is silently guessed away; if a path cannot be matched, the plugin tells
+you.
+
+## Unlinking
+
+Use **Library > Plug-in Extras > Immich: Unlink selected collection** to remove
+the saved link.
+
+This does **not** change the collection or the album. It only removes the
+association between them.
+
+## Troubleshooting
+
+### “This collection is not linked”
+
+Select the collection, then use `Library > Plug-in Extras > Immich: Link selected collection to album…`.
+
+### “No albums found on the Immich server”
+
+Check that:
+
+- the server URL is correct
+- the API key is correct
+- the user can see albums in Immich
+
+### Photos do not match even though the sync runs
+
+This is almost always a path-mapping problem.
+
+Check:
+
+- the Immich prefix is correct
+- the local prefix is the path Lightroom sees
+- the mapping uses tabs in the Plugin Manager text area
+- the files really exist locally at the mapped path
+
+### Photos are in Immich but not in the Lightroom catalog yet
+
+Use **Immich → Lightroom** sync. If the mapped local files exist, the plugin
+imports them into the Lightroom catalog and then adds them to the linked
+collection.
+
+If the preview shows **missing locally**, Lightroom cannot access the mapped
+file path. Fix the mount/path mapping first, then run sync again.
+
+### Lightroom still complains after updating the plugin
+
+Remove the plugin from **Plug-in Manager**, quit Lightroom completely, reopen
+it, and add the current plugin bundle again.
+
+## Limitations
+
+- Only **regular collections** are supported
+- Only **membership sync** is supported
+- The plugin stores the API key in Lightroom preferences as plaintext because
+   Lightroom SDK 3.0 does not provide a reliable encrypted storage API for this
+   plugin
 
 ## Documentation
 
-- [docs/architecture.md](docs/architecture.md) — module map.
-- [docs/ux-flow.md](docs/ux-flow.md) — screens and decisions.
-- [docs/path-mapping.md](docs/path-mapping.md) — mapping rules and examples.
-- [docs/lightroom-sdk-notes.md](docs/lightroom-sdk-notes.md) — SDK facts with sources.
-- [docs/testing.md](docs/testing.md) — test harness.
-- [docs/future/](docs/future/) — concrete plans for follow-up features.
-- [AGENTS.md](AGENTS.md) — entry point for humans and AI agents.
+- [`docs/path-mapping.md`](docs/path-mapping.md) — path translation rules and examples
+- [`docs/architecture.md`](docs/architecture.md) — module overview
+- [`docs/lightroom-sdk-notes.md`](docs/lightroom-sdk-notes.md) — Lightroom SDK quirks and sources
+- [`AGENTS.md`](AGENTS.md) — contributor/agent guide
+
+## Development
+
+```sh
+./test.sh
+./build.sh
+```
 
 ## Credits
 
 - [Jeffrey Friedl for JSON.lua](http://regex.info/blog/lua/json)
 - [Enrique García Cota for inspect.lua](https://github.com/kikito/inspect.lua)
-- [Min Idzelis](https://github.com/midzelis/mi.Immich.Publisher) and
-  [Ben Machek](https://github.com/bmachek/lrc-immich-plugin) whose prior
-  work mapped out the Immich API surface this plugin reuses.
+- [Min Idzelis](https://github.com/midzelis/mi.Immich.Publisher)
+- [Ben Machek](https://github.com/bmachek/lrc-immich-plugin)

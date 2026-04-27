@@ -1,6 +1,21 @@
-local Paths = require 'util.Paths'
+local Paths = require 'Paths'
 
 describe('util.Paths', function()
+	it('loads when Lightroom hides package/io globals', function()
+		local oldPackage = package
+		local oldIo = io
+		local oldImport = import
+		package = nil
+		io = nil
+		import = nil
+		local ok, loaded = pcall(dofile, 'src/Paths.lua')
+		package = oldPackage
+		io = oldIo
+		import = oldImport
+		assertEq(ok, true)
+		assertEq(type(loaded.normalizeSeparators), 'function')
+	end)
+
 	it('normalizes backslashes', function()
 		assertEq(Paths.normalizeSeparators('a\\b\\c'), 'a/b/c')
 	end)

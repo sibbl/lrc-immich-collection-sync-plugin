@@ -1,1 +1,0 @@
-return require('AliasLoader').load('vendor/JSON.lua')
