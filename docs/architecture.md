@@ -48,6 +48,9 @@ menu/LinkCollectionDialog.lua  menu/UnlinkAction.lua       menu/SyncDialog.lua
 - **CatalogIndex** — builds a `path → LrPhoto` map from a given list of
   photos. Caller injects case-folding. Caller passes photos; the LR
   catalog call lives outside the module.
+- **CatalogImport** — compatibility wrapper for importing existing local files
+  into Lightroom. Uses `catalog:addPhotos(paths)` when available, otherwise
+  falls back to the broadly-compatible `catalog:addPhoto(path)` loop.
 - **ImmichAPI** — the only HTTP client. Constructor takes an injectable
   `http` transport and `sleep` function, making retry/backoff testable.
 - **SyncEngine.computeDiff** — pure. Given collection photos, album

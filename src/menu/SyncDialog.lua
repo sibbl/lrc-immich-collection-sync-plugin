@@ -27,6 +27,7 @@ local ImmichAPI = require 'ImmichAPI'
 local PathMapper = require 'PathMapper'
 local CatalogIndex = require 'CatalogIndex'
 local SyncEngine = require 'SyncEngine'
+local CatalogImport = require 'CatalogImport'
 local Paths = require 'Paths'
 local Errors = require 'Errors'
 local Dialogs = require 'Dialogs'
@@ -304,7 +305,7 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSyncDialog', function(context)
 		collection = collection,
 		fileExists = function(path) return LrFileUtils.exists(path) end,
 		importPhotos = function(paths)
-			return catalog:addPhotos(paths)
+			return CatalogImport.importPhotos(catalog, paths)
 		end,
 		downloadAsset = function(assetId)
 			return api:downloadAsset(assetId)

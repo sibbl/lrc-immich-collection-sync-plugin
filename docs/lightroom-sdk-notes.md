@@ -42,7 +42,7 @@ official documentation is silent.
 | `photo:getRawMetadata('path')` returns the absolute file path. | SDK reference `LrPhoto`. |
 | There is **no** `findPhotoByPath` method. Build your own index. | Reverse-engineered: no occurrence in any reference plugin; confirmed absent in SDK reference. |
 | Any catalog mutation **must** be inside `catalog:withWriteAccessDo(name, fn)`. | SDK reference `LrCatalog`; used pervasively in bmachek `PublishTask.lua`. |
-| `catalog:addPhoto(path)` / `catalog:addPhotos(paths)` imports existing local files into the Lightroom catalog. | Historical repo implementations: old `ImportServiceProvider.lua` used `catalog:addPhoto(destinationPath)`, old `SyncServiceProvider.lua` used `catalog:addPhotos(photosToAdd)`. |
+| `catalog:addPhoto(path)` imports an existing local file into the Lightroom catalog. Some Lightroom Classic runtimes do **not** expose `catalog:addPhotos(paths)`, so production code must fall back to one-by-one `addPhoto`. | Current Lightroom runtime error reported against Lightroom Classic 15.2.1; historical repo implementations: old `ImportServiceProvider.lua` used `catalog:addPhoto(destinationPath)`, while some old sync code used `catalog:addPhotos(photosToAdd)`. |
 | `collection:addPhotos(photos)` / `:removePhotos(photos)` are idempotent. | SDK reference `LrCollection`. |
 | `catalog:getActiveSources()` returns currently-selected sidebar sources (folders, collections, sets). Filter by `src:type() == 'LrCollection'`. | SDK reference `LrCatalog`. |
 
