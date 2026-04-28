@@ -197,7 +197,7 @@ function M.sectionsForTopOfDialog(f, propertyTable)
 				}
 				local fetched, err = api:listLibraries()
 				if err then
-					dialogNotice = 'Could not refresh external libraries from Immich (' .. Errors.format(err) .. '). ' ..
+					dialogNotice = 'Could not refresh external libraries from Immich Collection Sync (' .. Errors.format(err) .. '). ' ..
 						'The dialog still shows built-in uploaded-library roots and your already-saved mappings.'
 				else
 					libs = fetched or {}

@@ -5,21 +5,21 @@
     - A "link" pairs a Lightroom collection C with an Immich album A.
     - For each run the user picks a direction D:
         'lr_to_immich'  : Immich gets aligned to Lightroom.
-        'immich_to_lr'  : Lightroom gets aligned to Immich.
+        'immich_to_lr'  : Lightroom gets aligned to Immich Collection Sync.
     - We never silently drop items; unresolvable ones surface as warnings.
 
   computeDiff parameters (all required unless noted):
     direction        'lr_to_immich' | 'immich_to_lr'
     collectionPhotos array of LrPhoto-like objects (the collection's members)
-    albumAssets      array of { id, originalPath } from Immich
+    albumAssets      array of { id, originalPath } from Immich Collection Sync
     pathMapper       PathMapper instance
     catalogIndex     CatalogIndex instance
 
   Returns a table:
     {
       direction,
-      toAddRemote   = { assetId… },            -- add to Immich album
-      toRemoveRemote= { assetId… },            -- remove from Immich album
+      toAddRemote   = { assetId… },            -- add to Immich Collection Sync album
+      toRemoveRemote= { assetId… },            -- remove from Immich Collection Sync album
       toAddLocal    = { LrPhoto… },            -- add to LR collection
 			toImportLocal = { {assetId, localPath} … }, -- import file, then add to LR collection
 			toDownloadLocal = { {assetId, fileName, originalPath} … }, -- download, import, add
@@ -153,7 +153,7 @@ function M.computeDiff(opts)
 	local toRemoveLocal = {}
 
 	if opts.direction == 'lr_to_immich' then
-		-- Add every LR photo to Immich whose mapped-to Immich asset is NOT in
+		-- Add every LR photo to Immich Collection Sync whose mapped-to Immich Collection Sync asset is NOT in
 		-- the album. That requires that the LR photo's file ALREADY exists as
 		-- an Immich asset; we only have such IDs via the album query, so
 		-- photos outside the album with no prior Immich record cannot be
@@ -161,10 +161,10 @@ function M.computeDiff(opts)
 		for _, photo in ipairs(collectionPhotosOutsideAlbum) do
 			table.insert(warnings.missingLocal, {
 				photoPath = photo:getRawMetadata('path'),
-				reason = 'photo in LR collection has no matching Immich asset; upload to Immich first',
+				reason = 'photo in LR collection has no matching Immich asset; upload to Immich Collection Sync first',
 			})
 		end
-		-- Remove from Immich album every asset whose LrPhoto is NOT in the LR collection.
+		-- Remove from Immich Collection Sync album every asset whose LrPhoto is NOT in the LR collection.
 		for _, assetId in ipairs(setDiff(remoteAssetIdSet, localAssetIdSet)) do
 			table.insert(toRemoveRemote, assetId)
 		end
@@ -248,7 +248,7 @@ function M.applyDiff(diff, deps)
 	end
 
 	if #diff.toRemoveRemote > 0 then
-		if step('Removing assets from Immich album…') then return result end
+		if step('Removing assets from Immich Collection Sync album…') then return result end
 		local _, err = deps.immichApi:removeAssetsFromAlbum(deps.albumId, diff.toRemoveRemote)
 		if err then
 			table.insert(result.errors, { op = 'remote_remove', err = err })
@@ -258,7 +258,7 @@ function M.applyDiff(diff, deps)
 	end
 
 	if #diff.toAddRemote > 0 then
-		if step('Adding assets to Immich album…') then return result end
+		if step('Adding assets to Immich Collection Sync album…') then return result end
 		local _, err = deps.immichApi:addAssetsToAlbum(deps.albumId, diff.toAddRemote)
 		if err then
 			table.insert(result.errors, { op = 'remote_add', err = err })

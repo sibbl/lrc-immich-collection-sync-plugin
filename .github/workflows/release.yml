@@ -35,8 +35,12 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           custom_tag: ${{ inputs.tag }}
+      - name: Build plugin
+        run: ./build.sh
       - name: Zip it up
-        run: zip -r 'immich-plugin.lrplugin.zip' immich-plugin.lrplugin -x '*.git*'
+        run: |
+          cd dist
+          zip -r "lrc-immich-collection-sync-plugin.lrplugin.zip" "lrc-immich-collection-sync-plugin.lrplugin" -x '*.git*'
       - name: Create a GitHub release
         uses: ncipollo/release-action@v1
         with:
@@ -45,5 +49,5 @@ jobs:
           # body: ${{ steps.tag_version.outputs.changelog }}
           generateReleaseNotes: true
           removeArtifacts: true
-          artifacts: "immich-plugin.lrplugin.zip"
+          artifacts: "dist/lrc-immich-collection-sync-plugin.lrplugin.zip"
           allowUpdates: true

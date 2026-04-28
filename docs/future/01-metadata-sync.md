@@ -5,7 +5,7 @@
 Users already manage photos in Immich year-round (ratings on mobile,
 captions when sharing). When they come back to Lightroom, those changes
 should appear without manual re-entry — and the reverse: Lightroom edits
-to star ratings, color labels, and keywords should flow to Immich for
+to star ratings, color labels, and keywords should flow to Immich Collection Sync for
 anyone viewing the library remotely.
 
 ## Scope
@@ -16,7 +16,7 @@ anyone viewing the library remotely.
 | Color label | `photo:getRawMetadata('colorNameForLabel')` | ⚠️ Immich has no native color label. Option: store in a keyword-like tag. | Propose `lr:color=red` convention. |
 | Keywords / Tags | `photo:getRawMetadata('keywordTags')` + `photo:addKeyword`/`removeKeyword` | `/assets/{id}/tags` | Straight set-union diff. |
 | Caption / Title | `photo:getRawMetadata('caption')` / `title` | `exifInfo.description`, `originalFileName` | Caption → description; title is file-name-ish, skip. |
-| GPS | `photo:getRawMetadata('gps')` | `exifInfo.latitude` / `longitude` | Read-only from LR unless user explicitly toggles "write metadata to Immich GPS". Lightroom already writes GPS to sidecar; usually Immich picks it up. |
+| GPS | `photo:getRawMetadata('gps')` | `exifInfo.latitude` / `longitude` | Read-only from LR unless user explicitly toggles "write metadata to Immich Collection Sync GPS". Lightroom already writes GPS to sidecar; usually Immich picks it up. |
 | Date taken | Raw EXIF. **Never** sync — corrupts originals. | — | Out of scope. |
 
 ## Conflict model
@@ -51,7 +51,7 @@ fields to sync.
   `Berlin`) is a separate follow-up.
 - Immich API surface for metadata writes has evolved across versions —
   check the minimum supported Immich version before committing.
-- Propagating a caption to Immich must not overwrite a user-entered
+- Propagating a caption to Immich Collection Sync must not overwrite a user-entered
   Immich caption when the LR caption is empty. Add an explicit
   "prefer non-empty source" rule.
 

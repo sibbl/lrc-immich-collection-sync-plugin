@@ -32,8 +32,8 @@ end
 function M.requireCredentials()
 	if M.hasCredentials() then return true end
 	LrDialogs.message(
-		'Immich Sync — not configured',
-		'Please set your Immich server URL and API key in\nFile > Plug-in Manager… > Immich Sync.',
+		'Immich Collection Sync — not configured',
+		'Please set your Immich server URL and API key in\nFile > Plug-in Manager… > Immich Collection Sync.',
 		'info')
 	return false
 end

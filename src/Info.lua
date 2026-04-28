@@ -1,5 +1,5 @@
 --[[
-  Immich Sync — Lightroom Classic plugin manifest.
+  Immich Collection Sync — Lightroom Classic plugin manifest.
 
   This plugin provides bidirectional membership sync between an Immich album
   and a Lightroom Classic collection. It does NOT upload or download any
@@ -16,8 +16,8 @@ return {
 	LrSdkVersion = 3.0,
 	LrSdkMinimumVersion = 3.0,
 
-	LrToolkitIdentifier = 'de.sibbl.immichsync',
-	LrPluginName = 'Immich Sync',
+	LrToolkitIdentifier = 'de.sibbl.lrc-immich-collection-sync-plugin',
+	LrPluginName = 'Immich Collection Sync',
 
 	LrInitPlugin = 'Init.lua',
 	LrPluginInfoProvider = 'PluginInfoProvider.lua',
@@ -26,15 +26,15 @@ return {
 	-- in the old plugin silently dropped the first declaration.
 	LrLibraryMenuItems = {
 		{
-			title = 'Immich: Link selected collection to album…',
+			title = 'Immich Collection Sync: Link selected collection to album…',
 			file = 'menu/LinkCollectionDialog.lua',
 		},
 		{
-			title = 'Immich: Unlink selected collection',
+			title = 'Immich Collection Sync: Unlink selected collection',
 			file = 'menu/UnlinkAction.lua',
 		},
 		{
-			title = 'Immich: Sync…',
+			title = 'Immich Collection Sync: Sync…',
 			file = 'menu/SyncDialog.lua',
 		},
 	},

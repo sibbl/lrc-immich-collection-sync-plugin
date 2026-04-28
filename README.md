@@ -1,6 +1,6 @@
-# Immich Sync for Lightroom Classic
+# Immich Collection Sync for Lightroom Classic
 
-This repository builds the **Immich Sync** Lightroom Classic plugin.
+This repository builds the **Immich Collection Sync** plugin for Lightroom Classic.
 
 It keeps a **Lightroom collection** and an **Immich album** in sync **on demand**,
 in **either direction**. Normally it does this by matching paths to the same
@@ -71,7 +71,7 @@ old plugin entry from Plug-in Manager and add the new bundle again.
 
 ## Configure the plugin
 
-Open **File > Plug-in Manager…** and select **Immich Sync**.
+Open **File > Plug-in Manager…** and select **Immich Collection Sync**.
 
 ### 1. Enter server settings
 
@@ -83,7 +83,7 @@ Then click **Test connection**.
 ### 2. Configure path mappings
 
 Use **Choose path mappings…** in the Plugin Manager. It refreshes External
-Library paths from Immich when your server settings are filled in, then opens a
+Library paths from Immich Collection Sync when your server settings are filled in, then opens a
 folder-chooser dialog. The dialog also shows common **uploaded/user library**
 roots because Immich's `/api/libraries` endpoint returns external libraries,
 not the default upload library.
@@ -118,9 +118,9 @@ For more examples, see [`docs/path-mapping.md`](docs/path-mapping.md).
 
 All actions live under `Library > Plug-in Extras`.
 
-- **Immich: Link selected collection to album…**
-- **Immich: Sync…**
-- **Immich: Unlink selected collection**
+- **Immich Collection Sync: Link selected collection to album…**
+- **Immich Collection Sync: Sync…**
+- **Immich Collection Sync: Unlink selected collection**
 
 ## First-time workflow
 
@@ -137,7 +137,7 @@ Create the target album in Immich if it does not already exist.
 ### Step 3: Link the collection to the album
 
 1. Select the collection in Lightroom
-2. Open **Library > Plug-in Extras > Immich: Link selected collection to album…**
+2. Open **Library > Plug-in Extras > Immich Collection Sync: Link selected collection to album…**
 3. Pick the Immich album
 4. Click **Link**
 
@@ -147,7 +147,7 @@ album.
 ### Step 4: Run a sync
 
 1. Select the linked collection
-2. Open **Library > Plug-in Extras > Immich: Sync…**
+2. Open **Library > Plug-in Extras > Immich Collection Sync: Sync…**
 3. Choose a direction:
    - **Immich → Lightroom** = make the collection match the album
    - **Lightroom → Immich** = make the album match the collection
@@ -175,9 +175,9 @@ If you have:
 then the next step is:
 
 1. Select the Lightroom collection
-2. Use **Immich: Link selected collection to album…**
+2. Use **Immich Collection Sync: Link selected collection to album…**
 3. Choose the album you created in Immich
-4. Use **Immich: Sync…**
+4. Use **Immich Collection Sync: Sync…**
 
 If **both sides are still empty**, sync will do nothing — which is correct.
 
@@ -187,7 +187,7 @@ After linking, you have two normal ways to work:
 
 1. Add photos to the album in Immich
 2. In Lightroom, select the linked collection
-3. Run **Immich: Sync…**
+3. Run **Immich Collection Sync: Sync…**
 4. Choose **Immich → Lightroom**
 
 Result: the collection gets those photos added or removed to match the album.
@@ -200,7 +200,7 @@ confirm the fallback and choose a save folder.
 
 1. Add photos to the Lightroom collection
 2. In Lightroom, select the linked collection
-3. Run **Immich: Sync…**
+3. Run **Immich Collection Sync: Sync…**
 4. Choose **Lightroom → Immich**
 
 Result: the Immich album gets those assets added or removed to match the
@@ -214,7 +214,7 @@ Typical workflow:
 
 1. Make changes on one side
 2. Select the linked Lightroom collection
-3. Run **Immich: Sync…**
+3. Run **Immich Collection Sync: Sync…**
 4. Choose which side should win for this run
 5. Review the preview
 6. Apply
@@ -243,7 +243,7 @@ you.
 
 ## Unlinking
 
-Use **Library > Plug-in Extras > Immich: Unlink selected collection** to remove
+Use **Library > Plug-in Extras > Immich Collection Sync: Unlink selected collection** to remove
 the saved link.
 
 This does **not** change the collection or the album. It only removes the
@@ -253,7 +253,7 @@ association between them.
 
 ### “This collection is not linked”
 
-Select the collection, then use `Library > Plug-in Extras > Immich: Link selected collection to album…`.
+Select the collection, then use `Library > Plug-in Extras > Immich Collection Sync: Link selected collection to album…`.
 
 ### “No albums found on the Immich server”
 

@@ -12,7 +12,7 @@ files on disk; the plugin translates Immich storage paths to Lightroom-
 visible paths using a user-configured prefix mapping table.
 
 The plugin registers **no export or publish service**. Everything is driven
-by menu items under `Library > Plug-in Extras > Immich: …`.
+by menu items under `Library > Plug-in Extras > Immich Collection Sync: …`.
 
 ## Repository layout
 

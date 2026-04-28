@@ -25,7 +25,7 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichLinkCollection', function(cont
 	if not Dialogs.requireCredentials() then return end
 	local collection, reason = Dialogs.activeCollection()
 	if not collection then
-		LrDialogs.message('Immich Sync', reason, 'info')
+		LrDialogs.message('Immich Collection Sync', reason, 'info')
 		return
 	end
 
@@ -35,11 +35,11 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichLinkCollection', function(cont
 	}
 	local albums, err = api:listAlbums()
 	if err then
-		LrDialogs.message('Immich Sync — could not fetch albums', Errors.format(err), 'critical')
+		LrDialogs.message('Immich Collection Sync — could not fetch albums', Errors.format(err), 'critical')
 		return
 	end
 	if #albums == 0 then
-		LrDialogs.message('Immich Sync', 'No albums found on the Immich server.', 'info')
+		LrDialogs.message('Immich Collection Sync', 'No albums found on the Immich server.', 'info')
 		return
 	end
 
@@ -81,7 +81,7 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichLinkCollection', function(cont
 	}
 
 	local result = LrDialogs.presentModalDialog{
-		title = 'Immich Sync — Link collection',
+		title = 'Immich Collection Sync — Link collection',
 		contents = contents,
 		actionVerb = 'Link',
 	}
@@ -101,8 +101,8 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichLinkCollection', function(cont
 	})
 
 	LrDialogs.message(
-		'Immich Sync',
-		('Linked "%s" to Immich album "%s".\nUse Library > Plug-in Extras > Immich: Sync… to sync.'):format(
+		'Immich Collection Sync',
+		('Linked "%s" to Immich Collection Sync album "%s".\nUse Library > Plug-in Extras > Immich Collection Sync: Sync… to sync.'):format(
 			collection:getName(), chosen.albumName or ''),
 		'info')
 end)

@@ -15,7 +15,7 @@ describe('PathMapper', function()
 		assertEq(p, '/nas/immich/other/IMG_2.jpg')
 	end)
 
-	it('reverse maps local to Immich', function()
+	it('reverse maps local to Immich Collection Sync', function()
 		Paths._setOS('linux')
 		local m = PathMapper.new{
 			{ immich = '/upload/', local_ = '/nas/immich/' },

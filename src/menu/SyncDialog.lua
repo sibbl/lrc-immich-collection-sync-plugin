@@ -113,7 +113,7 @@ local function promptDownloadFolder(context, f, count)
 			font = '<system/bold>',
 		},
 		f:static_text {
-			title = 'You can download the original files from Immich, save them to a folder, import them into the Lightroom catalog, and add them to this collection. Cancel skips downloading and applies only mapped changes.',
+			title = 'You can download the original files from Immich Collection Sync, save them to a folder, import them into the Lightroom catalog, and add them to this collection. Cancel skips downloading and applies only mapped changes.',
 			width_in_chars = 72,
 			height_in_lines = 4,
 		},
@@ -137,13 +137,13 @@ local function promptDownloadFolder(context, f, count)
 	}
 
 	local result = LrDialogs.presentModalDialog{
-		title = 'Immich Sync — Download unmapped assets?',
+		title = 'Immich Collection Sync — Download unmapped assets?',
 		contents = contents,
 		actionVerb = 'Download & import',
 	}
 	if result ~= 'ok' then return nil end
 	if not props.folder or props.folder == '' then
-		LrDialogs.message('Immich Sync', 'No download folder selected; skipping downloads.', 'warning')
+		LrDialogs.message('Immich Collection Sync', 'No download folder selected; skipping downloads.', 'warning')
 		return nil
 	end
 	Settings.setDownloadFolder(props.folder)
@@ -154,22 +154,22 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSyncDialog', function(context)
 	if not Dialogs.requireCredentials() then return end
 	local collection, reason = Dialogs.activeCollection()
 	if not collection then
-		LrDialogs.message('Immich Sync', reason, 'info')
+		LrDialogs.message('Immich Collection Sync', reason, 'info')
 		return
 	end
 
 	local store = MappingStore.new(LrPrefs.prefsForPlugin())
 	local link = store:get(collection.localIdentifier)
 	if not link then
-		LrDialogs.message('Immich Sync',
-			'This collection is not linked. Use Library > Plug-in Extras > Immich: Link selected collection… first.',
+		LrDialogs.message('Immich Collection Sync',
+			'This collection is not linked. Use Library > Plug-in Extras > Immich Collection Sync: Link selected collection… first.',
 			'info')
 		return
 	end
 
 	local catalog = LrApplication.activeCatalog()
 	local progress = LrProgressScope{
-		title = ('Immich Sync: %s'):format(collection:getName()),
+		title = ('Immich Collection Sync: %s'):format(collection:getName()),
 		functionContext = context,
 	}
 	progress:setCancelable(true)
@@ -182,7 +182,7 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSyncDialog', function(context)
 	local album, err = api:getAlbum(link.albumId)
 	if err then
 		progress:done()
-		LrDialogs.message('Immich Sync', 'Failed to fetch album: ' .. Errors.format(err), 'critical')
+		LrDialogs.message('Immich Collection Sync', 'Failed to fetch album: ' .. Errors.format(err), 'critical')
 		return
 	end
 	local assetById = {}
@@ -222,7 +222,7 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSyncDialog', function(context)
 		},
 	}
 	local choice = LrDialogs.presentModalDialog{
-		title = 'Immich Sync — Direction',
+		title = 'Immich Collection Sync — Direction',
 		contents = directionDialog,
 		actionVerb = 'Analyze',
 	}
@@ -245,8 +245,8 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSyncDialog', function(context)
 		and 'Lightroom → Immich' or 'Immich → Lightroom'))
 	addLine('')
 	if properties.direction == 'lr_to_immich' then
-		addLine(('Add to Immich album:    %d'):format(#diff.toAddRemote))
-		addLine(('Remove from Immich album: %d'):format(#diff.toRemoveRemote))
+		addLine(('Add to Immich Collection Sync album:    %d'):format(#diff.toAddRemote))
+		addLine(('Remove from Immich Collection Sync album: %d'):format(#diff.toRemoveRemote))
 	else
 		addLine(('Import into Lightroom catalog:   %d'):format(#(diff.toImportLocal or {})))
 		addLine(('Add to Lightroom collection:    %d'):format(#diff.toAddLocal + #(diff.toImportLocal or {})))
@@ -282,7 +282,7 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSyncDialog', function(context)
 
 	progress:setCaption('Waiting for confirmation…')
 	local previewChoice = LrDialogs.confirm(
-		'Immich Sync — Preview',
+		'Immich Collection Sync — Preview',
 		table.concat(previewLines, '\n'),
 		'Apply', 'Cancel')
 	if previewChoice ~= 'ok' then progress:done(); return end
@@ -332,8 +332,8 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSyncDialog', function(context)
 	progress:done()
 
 	local lines = {
-		('Added to Immich:     %d'):format(result.addedRemote),
-		('Removed from Immich: %d'):format(result.removedRemote),
+		('Added to Immich Collection Sync Collection Sync:     %d'):format(result.addedRemote),
+		('Removed from Immich Collection Sync Collection Sync: %d'):format(result.removedRemote),
 		('Downloaded:         %d'):format(result.downloadedLocal or 0),
 		('Imported to LR:      %d'):format(result.importedLocal or 0),
 		('Added to LR:         %d'):format(result.addedLocal),
@@ -346,5 +346,5 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSyncDialog', function(context)
 			table.insert(lines, ('  [%s] %s'):format(e.op, Errors.format(e.err)))
 		end
 	end
-	LrDialogs.message('Immich Sync — done', table.concat(lines, '\n'), 'info')
+	LrDialogs.message('Immich Collection Sync — done', table.concat(lines, '\n'), 'info')
 end)

@@ -47,7 +47,7 @@ dropped**. Typical causes:
 
 - An external library whose Immich prefix is not configured.
 - Local photos that live outside any mapping (e.g. on an internal SSD
-  unrelated to Immich).
+  unrelated to Immich Collection Sync).
 - A mapping typo.
 
 Fix by adding a mapping in the Plugin Manager settings and re-running.
@@ -99,7 +99,7 @@ internal    /home/me/immich-library/   /home/me/immich-library/
 
 Identical prefixes are legal; the mapping just passes through.
 
-## Discovering libraries from Immich
+## Discovering libraries from Immich Collection Sync
 
 Immich External Libraries can have one or more `importPaths` — each is a path
 the Immich process scans for photos. The plugin can fetch these automatically.
@@ -107,7 +107,7 @@ Immich's API also has a default upload library for each user, but those uploaded
 asset roots are not returned as external-library `importPaths`, so the dialog
 adds common uploaded/user-library roots itself.
 
-1. Open `File > Plug-in Manager… > Immich Sync`.
+1. Open `File > Plug-in Manager… > Immich Collection Sync`.
 2. In **Path Mappings**, click **Choose path mappings…**.
 3. The dialog lists common uploaded/user-library roots first, then every
   external library and every `importPath`, plus any previously saved mappings

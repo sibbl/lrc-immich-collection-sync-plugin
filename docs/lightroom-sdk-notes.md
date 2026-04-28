@@ -27,7 +27,7 @@ official documentation is silent.
 | Key | Notes |
 | --- | --- |
 | `LrSdkVersion` / `LrSdkMinimumVersion` | We target `3.0`. |
-| `LrToolkitIdentifier` | Unique reverse-DNS-ish string. Ours: `de.sibbl.immichsync`. |
+| `LrToolkitIdentifier` | Unique reverse-DNS-ish string. Ours: `de.sibbl.lrc-immich-collection-sync-plugin`. |
 | `LrPluginName` | User-visible name. |
 | `LrInitPlugin` | Path to an init script, runs on load. |
 | `LrPluginInfoProvider` | Path to a module returning a table with `sectionsForTopOfDialog` / `sectionsForBottomOfDialog`. |

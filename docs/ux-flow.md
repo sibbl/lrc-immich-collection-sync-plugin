@@ -4,7 +4,7 @@ One primary loop: **configure once, link per collection, sync on demand**.
 
 ## Step 1 — Configure (once)
 
-`File > Plug-in Manager… > Immich Sync`
+`File > Plug-in Manager… > Immich Collection Sync`
 
 Three sections:
 
@@ -21,14 +21,14 @@ Three sections:
 ## Step 2 — Link a collection to an album (once per collection)
 
 1. In the Library module, select a **non-smart collection** in the sidebar.
-2. `Library > Plug-in Extras > Immich: Link selected collection to album…`
+2. `Library > Plug-in Extras > Immich Collection Sync: Link selected collection to album…`
 3. Pick an album from the sorted list. Relinking overwrites the existing
    mapping.
 
 ## Step 3 — Sync (any time)
 
 1. Select the linked collection.
-2. `Library > Plug-in Extras > Immich: Sync…`
+2. `Library > Plug-in Extras > Immich Collection Sync: Sync…`
 3. Choose direction:
    - **Immich → Lightroom** — mirror the Immich album into the LR
      collection. Adds locally-available photos that the album contains
@@ -43,7 +43,7 @@ Three sections:
 
 ## Step 4 — Unlink (rare)
 
-`Library > Plug-in Extras > Immich: Unlink selected collection`. Leaves
+`Library > Plug-in Extras > Immich Collection Sync: Unlink selected collection`. Leaves
 the collection and album both untouched — only the stored mapping is
 removed.
 

@@ -17,4 +17,4 @@ else
 	logger:disable()
 end
 
-logger:info('Immich Sync plugin loaded')
+logger:info('Immich Collection Sync plugin loaded')
