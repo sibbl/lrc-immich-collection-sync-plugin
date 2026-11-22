@@ -1,19 +1,21 @@
 # Immich Collection Sync for Lightroom Classic
 
-Keep a **Lightroom Classic collection** and an **Immich album** in sync on demand, in either direction — without uploading or duplicating files.
+Keep **Lightroom Classic collections** and **Immich albums** in sync on demand — without uploading or duplicating files.
 
-Both Lightroom and Immich reference the same physical files on disk (for example, on a NAS) via a simple path-prefix mapping. If an Immich asset is not yet in your Lightroom catalog, the plugin imports the existing local file in place; if an asset has no mapped local path, you can optionally confirm a download fallback during **Immich → Lightroom** sync.
+Both Lightroom and Immich reference the same physical files on disk (for example, on a NAS) via path-prefix mappings. If an Immich asset is not yet in your Lightroom catalog, the plugin imports the existing local file in place; if an asset has no mapped local path, you can optionally confirm a download fallback during **Immich → Lightroom** sync.
 
 ## Features
 
-- **Bidirectional, on-demand membership sync**
+- **Bidirectional album ↔ collection sync** (remembers your last chosen direction per collection)
   - **Immich → Lightroom**: mirrors an Immich album into a Lightroom collection (imports already-local files into the catalog if needed, and offers an optional download fallback for unmapped assets)
   - **Lightroom → Immich**: mirrors a Lightroom collection into an Immich album (looks up matching Immich assets by mapped path and adds/removes album membership)
+- **Two-way metadata sync** — sync star ratings, favorites ↔ pick flags, captions ↔ descriptions, GPS coordinates, and keywords ↔ Immich tags (+ Immich people → `People/<name>`) with a preview and optional overwrite toggle
+- **Immich Smart Search inside Lightroom** — run AI/CLIP search queries (*"sunset over mountains"*) and gather all matching local catalog photos into an `Immich search results` collection
+- **Open linked album & create share links** — jump straight to a linked Immich album in your browser or generate a share link (with optional expiry/password)
 - **Owned and shared Immich albums** supported
-- **Preview before applying**: shows counts, active path mappings, and warnings before touching your catalog or album
-- **Zero uploads, no file moving/renaming**
+- **Preview before applying** — inspect counts, active path mappings, and warnings before touching your catalog or album
 
-> **What this plugin does not do:** file uploads, metadata sync (ratings/keywords/captions), background live sync, smart collections, or automatic album/collection creation.
+> **What this plugin does not do:** file uploads, background live sync, smart collections, or automatic album/collection creation for links.
 
 ---
 
@@ -51,7 +53,9 @@ Open **File > Plug-in Manager…** and select **Immich Collection Sync**.
 Recommended Immich API key scopes:
 
 - `album.read`, `album.write` — list albums, read album membership, add/remove album assets
-- `asset.read` — look up assets and download unmapped originals (if you use the download fallback)
+- `asset.read` — look up assets, smart search, and download unmapped originals
+- `asset.update`, `tag.create`, `tag.asset` — push metadata and keywords in **Sync metadata…**
+- `sharedLink.create` — create album share links
 - `library.read` — discover External Library paths automatically
 - `user.read` — show your signed-in account in **Test connection**
 
@@ -78,16 +82,13 @@ Make sure `/data/` points to the root of your Immich data folder (not `/data/lib
 
 All actions live under **Library > Plug-in Extras**:
 
-1. **Link a collection to an album** (once per pair)
-   - Select a regular (non-smart) Lightroom collection in the sidebar.
-   - Choose **Immich Collection Sync: Link selected collection to album…**, pick the Immich album, and click **Link**.
-2. **Sync** (whenever you want)
-   - Select the linked collection and choose **Immich Collection Sync: Sync…**.
-   - Pick the direction (**Immich → Lightroom** or **Lightroom → Immich**) and click **Analyze**.
-   - Review the preview (add/remove/import counts and any warnings), then click **Apply**.
-   - In **Immich → Lightroom** mode, if any Immich assets have no matching path mapping, you can optionally confirm downloading their originals to a chosen folder (which is remembered and tracked to avoid duplicate downloads on future runs).
-3. **Unlink** (optional)
-   - Choose **Immich Collection Sync: Unlink selected collection**. Both the Lightroom collection and Immich album remain untouched.
+- **Link selected collection to album…** — pair a regular (non-smart) Lightroom collection with an Immich album.
+- **Sync…** — choose **Immich → Lightroom** or **Lightroom → Immich**, review the preview, and click **Apply**. In **Immich → Lightroom** mode, unmapped Immich assets can optionally be downloaded to a remembered folder (tracked to avoid duplicate downloads).
+- **Sync metadata…** — select one or more photos (or a collection), pick direction and metadata fields (ratings, favorites, captions, GPS, keywords/people), preview changes, and apply.
+- **Smart search in Lightroom…** — enter an Immich Smart/CLIP search query to collect matching catalog photos under `Immich search results`.
+- **Open linked album in browser** — open the active collection's linked Immich album in your default browser.
+- **Create album share link…** — generate a public Immich share link for the linked album (with optional expiry/password).
+- **Unlink selected collection** — remove the stored link without changing the collection or album.
 
 ---
 
@@ -96,7 +97,7 @@ All actions live under **Library > Plug-in Extras**:
 - **`missing locally` warning in Preview**: The preview prints `immichPath → localPath`. Check that your NAS/drive is mounted and that the translated local path matches the actual file on disk (watch out for extra subfolders like `/library/library/`).
 - **`not found on Immich` warning (`Lightroom → Immich`)**: The photo's local path maps to an Immich path that Immich has not indexed yet. Upload or scan the file in Immich first, then sync again.
 - **Immich album shows `0 assets fetched` while `assetCount > 0`**: Check that your Immich API key has `album.read` and `asset.read` permissions and that your user has access to the album's assets.
-- **Need detailed logs?** Enable **Enable debug logging** under **Diagnostics** in Plug-in Manager, run sync again, and click **Show log file**.
+- **Need detailed logs?** Enable **Enable debug logging** under **Diagnostics** in Plug-in Manager, run an action again, and click **Show log file**.
 
 ---
 
@@ -110,8 +111,9 @@ All actions live under **Library > Plug-in Extras**:
 ## Development
 
 ```sh
-./test.sh    # run Lua 5.1 unit tests (requires luajit or lua5.1)
-./build.sh   # build dist/lrc-immich-collection-sync-plugin.lrplugin/
+./test.sh          # run Lua 5.1 unit tests (requires luajit or lua5.1)
+luacheck src tests # static Lua 5.1 linting (optional)
+./build.sh         # build dist/lrc-immich-collection-sync-plugin.lrplugin/
 ```
 
 Developer documentation lives in [`docs/`](docs/):

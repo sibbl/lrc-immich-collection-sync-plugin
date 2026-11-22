@@ -374,9 +374,10 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSyncDialog', function(context)
 	local f = LrView.osFactory()
 
 	-- Ask direction FIRST so clicking Cancel does not waste time fetching the
-	-- album or indexing a large Lightroom catalog.
+	-- album or indexing a large Lightroom catalog. Pre-select the last
+	-- direction used for this linked collection.
 	local properties = LrBinding.makePropertyTable(context)
-	properties.direction = 'immich_to_lr'
+	properties.direction = (link.lastDirection == 'lr_to_immich') and 'lr_to_immich' or 'immich_to_lr'
 	local directionDialog = f:column {
 		spacing = f:control_spacing(),
 		bind_to_object = properties,
@@ -399,6 +400,8 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSyncDialog', function(context)
 		actionVerb = 'Analyze',
 	}
 	if choice ~= 'ok' then return end
+
+	store:setLastDirection(collection.localIdentifier, properties.direction)
 
 	Logger.info(('Starting sync (%s) for collection "%s" (id=%s) <-> album "%s" (id=%s)'):format(
 		properties.direction, collection:getName(), tostring(collection.localIdentifier),

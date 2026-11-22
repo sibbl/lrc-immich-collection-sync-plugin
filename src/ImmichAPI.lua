@@ -33,8 +33,10 @@ local function trimSlash(s)
 end
 
 local HTTP_TIMEOUT_SECONDS = 30
+local SEARCH_TIMEOUT_SECONDS = 60
 local DOWNLOAD_TIMEOUT_SECONDS = 180
 local DEFAULT_BATCH_SIZE = 250
+local MAX_SMART_SEARCH_RESULTS = 1250
 
 -- Build the default HTTP adapter lazily so requiring this module does not
 -- pull LrHttp during unit tests (where `import` is a mock).
@@ -459,6 +461,165 @@ end
 
 function M:removeAssetsFromAlbum(albumId, assetIds)
 	return mutateAlbumAssets(self, 'DELETE', albumId, assetIds or {}, 'removed', false)
+end
+
+-- Browser URL for an Immich album.
+function M:albumUrl(albumId)
+	if self.serverUrl == '' or albumId == nil or albumId == '' then return nil end
+	return self.serverUrl .. '/albums/' .. tostring(albumId)
+end
+
+-- Run an Immich CLIP / smart search via POST /api/search/smart.
+-- opts (optional): { maxResults = 500, pageSize = 250, timeout = 60 }
+-- Returns (assetsArray, nil) or (nil, err).
+function M:searchSmart(query, opts)
+	local q = trim(query)
+	if q == '' then
+		return nil, Errors.make('bad_request', 'Search query is required')
+	end
+	opts = opts or {}
+	local maxResults = math.min(tonumber(opts.maxResults) or 500, MAX_SMART_SEARCH_RESULTS)
+	local pageSize = math.min(tonumber(opts.pageSize) or 250, maxResults)
+	local timeout = tonumber(opts.timeout) or SEARCH_TIMEOUT_SECONDS
+
+	local all = {}
+	local seen = {}
+	local page = 1
+	local maxPages = 20
+
+	while page <= maxPages and #all < maxResults do
+		local reqBody = JSON:encode({ query = q, page = page, size = pageSize })
+		local respBody, _, err = self:_request('POST', '/api/search/smart', reqBody, nil, timeout)
+		if err then return nil, err end
+		local data = decode(respBody)
+		if type(data) ~= 'table' then
+			return nil, Errors.make('bad_response', 'Unexpected /search/smart response')
+		end
+		local box = type(data.assets) == 'table' and data.assets or data
+		local items = type(box.items) == 'table' and box.items or {}
+		if #items == 0 then break end
+
+		local added = 0
+		for _, item in ipairs(items) do
+			if item.id and not item.isTrashed and not seen[item.id] then
+				seen[item.id] = true
+				table.insert(all, item)
+				added = added + 1
+				if #all >= maxResults then break end
+			end
+		end
+		if added == 0 then break end
+
+		local nextPage = box.nextPage and tonumber(box.nextPage) or nil
+		if nextPage and nextPage > page then
+			page = nextPage
+		elseif box.hasNextPage == true then
+			page = page + 1
+		else
+			break
+		end
+	end
+
+	return all, nil
+end
+
+-- Create a public Immich shared link for an album via POST /api/shared-links.
+-- opts (optional): { allowDownload = true, allowUpload = false, showMetadata = true,
+--                    password = string, expiresAt = ISO8601, description = string }
+-- Returns ({ id, key, url, raw }, nil) or (nil, err).
+function M:createAlbumSharedLink(albumId, opts)
+	if albumId == nil or albumId == '' then
+		return nil, Errors.make('bad_request', 'albumId is required')
+	end
+	opts = opts or {}
+	local payload = {
+		type = 'ALBUM',
+		albumId = tostring(albumId),
+		allowDownload = opts.allowDownload ~= false,
+		allowUpload = opts.allowUpload == true,
+		showMetadata = opts.showMetadata ~= false,
+	}
+	if opts.password and trim(opts.password) ~= '' then
+		payload.password = trim(opts.password)
+	end
+	if opts.expiresAt and trim(opts.expiresAt) ~= '' then
+		payload.expiresAt = trim(opts.expiresAt)
+	end
+	if opts.description and trim(opts.description) ~= '' then
+		payload.description = trim(opts.description)
+	end
+
+	local respBody, _, err = self:_request('POST', '/api/shared-links', JSON:encode(payload))
+	if err then return nil, err end
+	local data = decode(respBody)
+	if type(data) ~= 'table' or not data.key or data.key == '' then
+		return nil, Errors.make('bad_response', 'Unexpected /shared-links response (missing key)')
+	end
+	return {
+		id = data.id,
+		key = data.key,
+		url = self.serverUrl .. '/share/' .. tostring(data.key),
+		raw = data,
+	}, nil
+end
+
+-- Fetch full asset details (including exifInfo, tags, people) via GET /api/assets/{id}.
+function M:getAsset(assetId)
+	if assetId == nil or assetId == '' then
+		return nil, Errors.make('bad_request', 'assetId is required')
+	end
+	local respBody, _, err = self:_request('GET', '/api/assets/' .. tostring(assetId))
+	if err then return nil, err end
+	local data = decode(respBody)
+	if type(data) ~= 'table' then
+		return nil, Errors.make('bad_response', 'Unexpected /assets response')
+	end
+	return data, nil
+end
+
+-- Update metadata fields on an Immich asset via PUT /api/assets/{id}.
+function M:updateAsset(assetId, fields)
+	if assetId == nil or assetId == '' then
+		return nil, Errors.make('bad_request', 'assetId is required')
+	end
+	if type(fields) ~= 'table' then
+		return nil, Errors.make('bad_request', 'fields table is required')
+	end
+	local body = {}
+	for _, key in ipairs({ 'isFavorite', 'rating', 'description', 'latitude', 'longitude' }) do
+		if fields[key] ~= nil then
+			body[key] = fields[key]
+		end
+	end
+	if next(body) == nil then return { updated = false }, nil end
+
+	local respBody, _, err = self:_request('PUT', '/api/assets/' .. tostring(assetId), JSON:encode(body))
+	if err then return nil, err end
+	return decode(respBody) or { updated = true }, nil
+end
+
+-- Upsert Immich tags by name/path via PUT /api/tags. Returns array of { id, name, value }.
+function M:upsertTags(tagNames)
+	if type(tagNames) ~= 'table' or #tagNames == 0 then return {}, nil end
+	local respBody, _, err = self:_request('PUT', '/api/tags', JSON:encode({ tags = tagNames }))
+	if err then return nil, err end
+	local data = decode(respBody)
+	if type(data) ~= 'table' then
+		return nil, Errors.make('bad_response', 'Unexpected /tags response')
+	end
+	return data, nil
+end
+
+-- Assign tag IDs to an asset via PUT /api/tags/assets.
+function M:assignTagsToAsset(tagIds, assetId)
+	if type(tagIds) ~= 'table' or #tagIds == 0 then return { assigned = 0 }, nil end
+	if assetId == nil or assetId == '' then
+		return nil, Errors.make('bad_request', 'assetId is required')
+	end
+	local respBody, _, err = self:_request('PUT', '/api/tags/assets',
+		JSON:encode({ tagIds = tagIds, assetIds = { tostring(assetId) } }))
+	if err then return nil, err end
+	return decode(respBody) or { assigned = #tagIds }, nil
 end
 
 return M

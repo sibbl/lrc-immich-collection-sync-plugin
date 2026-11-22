@@ -10,8 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install LuaJIT
-        run: sudo apt-get update && sudo apt-get install -y luajit
+      - name: Install LuaJIT & luacheck
+        run: sudo apt-get update && sudo apt-get install -y luajit lua-check
+      - name: Lint with luacheck
+        run: luacheck src tests
       - name: Run tests
         run: ./test.sh
       - name: Build plugin bundle

@@ -71,17 +71,33 @@ function M:set(collectionLocalId, info)
 	assert(type(info) == 'table', 'mapping info must be a table')
 	assert(info.albumId and info.albumId ~= '', 'albumId required')
 	local all = self:_readAll()
+	local existing = all[self:_key(collectionLocalId)]
+		or (self.catalogId and all[tostring(collectionLocalId)] or nil)
 	all[self:_key(collectionLocalId)] = {
 		albumId = info.albumId,
 		albumName = info.albumName or '',
 		serverUrl = info.serverUrl or '',
-		linkedAt = info.linkedAt or os.date('!%Y-%m-%dT%H:%M:%SZ'),
+		linkedAt = info.linkedAt or (existing and existing.linkedAt) or os.date('!%Y-%m-%dT%H:%M:%SZ'),
+		lastDirection = info.lastDirection or (existing and existing.lastDirection) or nil,
 	}
 	-- Migrate away from legacy unscoped key when writing under a catalogId.
 	if self.catalogId then
 		all[tostring(collectionLocalId)] = nil
 	end
 	self:_writeAll(all)
+end
+
+function M:setLastDirection(collectionLocalId, direction)
+	if direction ~= 'immich_to_lr' and direction ~= 'lr_to_immich' then return end
+	local existing = self:get(collectionLocalId)
+	if not existing or not existing.albumId then return end
+	self:set(collectionLocalId, {
+		albumId = existing.albumId,
+		albumName = existing.albumName,
+		serverUrl = existing.serverUrl,
+		linkedAt = existing.linkedAt,
+		lastDirection = direction,
+	})
 end
 
 function M:remove(collectionLocalId)

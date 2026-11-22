@@ -62,4 +62,32 @@ function M.setPathMappings(list)
 	writeJson('pathMappings', list or {})
 end
 
+-- Metadata sync preferences -------------------------------------------------
+local DEFAULT_METADATA_PREFS = {
+	direction = 'immich_to_lr',
+	rating = true,
+	favorite = true,
+	caption = true,
+	gps = false,
+	keywords = true,
+	overwrite = false,
+}
+
+function M.getMetadataSyncPrefs()
+	local stored = readJson('metadataSyncPrefs', nil)
+	local out = {}
+	for k, v in pairs(DEFAULT_METADATA_PREFS) do
+		if type(stored) == 'table' and stored[k] ~= nil then
+			out[k] = stored[k]
+		else
+			out[k] = v
+		end
+	end
+	return out
+end
+
+function M.setMetadataSyncPrefs(tbl)
+	writeJson('metadataSyncPrefs', tbl or DEFAULT_METADATA_PREFS)
+end
+
 return M

@@ -223,4 +223,61 @@ describe('ImmichAPI', function()
 		end
 		assertEq(accept, '*/*')
 	end)
+
+	it('albumUrl builds browser URL from normalized serverUrl', function()
+		local api = ImmichAPI.new{ serverUrl = 'https://photos.example.com/', apiKey = 'k',
+			http = fakeHttp{}, sleep = function() end }
+		assertEq(api:albumUrl('ALB-1'), 'https://photos.example.com/albums/ALB-1')
+		assertNil(api:albumUrl(''))
+	end)
+
+	it('searchSmart paginates POST /api/search/smart and skips trashed items', function()
+		local http = fakeHttp{
+			{ body = '{"assets":{"items":[{"id":"1","originalPath":"/data/1.jpg"},{"id":"T","originalPath":"/data/t.jpg","isTrashed":true}],"nextPage":"2"}}',
+			  headers = { status = 200 } },
+			{ body = '{"assets":{"items":[{"id":"2","originalPath":"/data/2.jpg"}],"nextPage":null}}',
+			  headers = { status = 200 } },
+		}
+		local api = ImmichAPI.new{ serverUrl = 'https://x', apiKey = 'k',
+			http = http, sleep = function() end }
+		local items, err = api:searchSmart('sunset', { maxResults = 100 })
+		assertNil(err)
+		assertEq(#items, 2)
+		assertEq(items[1].id, '1')
+		assertEq(items[2].id, '2')
+		assertEq(http.calls[1].url, 'https://x/api/search/smart')
+		assertTrue(http.calls[1].timeout >= 60)
+	end)
+
+	it('createAlbumSharedLink posts ALBUM share payload and returns full URL', function()
+		local http = fakeHttp{ { body = '{"id":"SL1","key":"abc123"}', headers = { status = 201 } } }
+		local api = ImmichAPI.new{ serverUrl = 'https://photos.example.com/', apiKey = 'k',
+			http = http, sleep = function() end }
+		local res, err = api:createAlbumSharedLink('ALB-1', { allowDownload = true, password = 'pw' })
+		assertNil(err)
+		assertEq(res.url, 'https://photos.example.com/share/abc123')
+		local req = JSON:decode(http.calls[1].body)
+		assertEq(req.type, 'ALBUM')
+		assertEq(req.albumId, 'ALB-1')
+		assertEq(req.password, 'pw')
+	end)
+
+	it('getAsset, updateAsset, upsertTags, and assignTagsToAsset hit expected Immich endpoints', function()
+		local http = fakeHttp{
+			{ body = '{"id":"A1","isFavorite":true}', headers = { status = 200 } },
+			{ body = '{"id":"A1"}', headers = { status = 200 } },
+			{ body = '[{"id":"T1","value":"travel"}]', headers = { status = 200 } },
+			{ body = '[{"id":"A1","success":true}]', headers = { status = 200 } },
+		}
+		local api = ImmichAPI.new{ serverUrl = 'https://x', apiKey = 'k',
+			http = http, sleep = function() end }
+		local asset, err1 = api:getAsset('A1')
+		assertNil(err1); assertEq(asset.isFavorite, true)
+		local _, err2 = api:updateAsset('A1', { rating = 5, description = 'hi' })
+		assertNil(err2); assertEq(http.calls[2].method, 'PUT')
+		local tags, err3 = api:upsertTags({ 'travel' })
+		assertNil(err3); assertEq(tags[1].id, 'T1')
+		local _, err4 = api:assignTagsToAsset({ 'T1' }, 'A1')
+		assertNil(err4); assertEq(http.calls[4].url, 'https://x/api/tags/assets')
+	end)
 end)

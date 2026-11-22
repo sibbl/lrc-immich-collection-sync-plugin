@@ -31,12 +31,28 @@ return {
 			file = 'menu/LinkCollectionDialog.lua',
 		},
 		{
-			title = 'Immich Collection Sync: Unlink selected collection',
-			file = 'menu/UnlinkAction.lua',
-		},
-		{
 			title = 'Immich Collection Sync: Sync…',
 			file = 'menu/SyncDialog.lua',
+		},
+		{
+			title = 'Immich Collection Sync: Sync metadata…',
+			file = 'menu/MetadataSyncDialog.lua',
+		},
+		{
+			title = 'Immich Collection Sync: Smart search in Lightroom…',
+			file = 'menu/SmartSearchDialog.lua',
+		},
+		{
+			title = 'Immich Collection Sync: Open linked album in browser',
+			file = 'menu/OpenAlbumAction.lua',
+		},
+		{
+			title = 'Immich Collection Sync: Create album share link…',
+			file = 'menu/ShareAlbumDialog.lua',
+		},
+		{
+			title = 'Immich Collection Sync: Unlink selected collection',
+			file = 'menu/UnlinkAction.lua',
 		},
 	},
 

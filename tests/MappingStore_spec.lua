@@ -44,6 +44,17 @@ describe('MappingStore', function()
 		assertNil(catB:getDownloadedAssets()['asset-1'])
 	end)
 
+	it('remembers lastDirection per collection and preserves it across updates', function()
+		local s = MappingStore.new({}, { catalogId = '/A.lrcat' })
+		s:set(5, { albumId = 'alb-1', albumName = 'Old Name' })
+		s:setLastDirection(5, 'lr_to_immich')
+		assertEq(s:get(5).lastDirection, 'lr_to_immich')
+		-- Renaming album preserves lastDirection.
+		s:set(5, { albumId = 'alb-1', albumName = 'New Name' })
+		assertEq(s:get(5).lastDirection, 'lr_to_immich')
+		assertEq(s:get(5).albumName, 'New Name')
+	end)
+
 	it('remove deletes the entry', function()
 		local s = MappingStore.new({})
 		s:set(1, { albumId = 'a' })
