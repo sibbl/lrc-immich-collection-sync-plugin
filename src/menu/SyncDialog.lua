@@ -2,12 +2,15 @@
   Sync the currently-selected collection with its linked Immich album.
 
   Flow:
-    1. Resolve link from MappingStore.
-    2. Fetch album assets.
-    3. Build a fresh CatalogIndex from the active catalog.
-    4. Ask the user for a direction.
-    5. Show a diff preview dialog (counts + warnings).
-    6. On confirm, apply.
+    1. Resolve link from catalog-scoped MappingStore (and verify server URL).
+    2. Ask the user for direction first (so Cancel is instant).
+    3. Fetch album assets and refresh cached album name if renamed.
+    4. Build a fresh CatalogIndex (using batchGetRawMetadata when available).
+    5. Compute diff (resolving un-matched LR photos via Immich metadata search
+       when syncing Lightroom → Immich).
+    6. Short-circuit if already in sync, otherwise show a scrollable preview.
+    7. Optionally prompt for download fallback on unmapped Immich assets.
+    8. Apply changes with progress reporting and log the outcome.
 ]]
 
 local LrApplication = import 'LrApplication'
@@ -31,6 +34,7 @@ local CatalogImport = require 'CatalogImport'
 local Paths = require 'Paths'
 local Errors = require 'Errors'
 local Dialogs = require 'Dialogs'
+local Logger = require 'Logger'
 
 local function extensionIndex(name)
 	local idx
@@ -40,13 +44,6 @@ local function extensionIndex(name)
 		if c == '/' or c == '\\' then break end
 	end
 	return idx
-end
-
-local function sanitizeFileName(name, fallback)
-	name = name or fallback or 'immich-asset'
-	name = tostring(name):gsub('[\\/:*?"<>|]', '_')
-	if name == '' then name = fallback or 'immich-asset' end
-	return name
 end
 
 local function uniqueChildPath(folder, fileName)
@@ -88,21 +85,48 @@ end
 
 local function downloadEntriesFromWarnings(diff, assetById)
 	local entries = {}
+	local videoCount = 0
 	for _, warning in ipairs(diff.warnings.unmappableImmich or {}) do
 		local asset = assetById[warning.assetId] or {}
-		local leaf = asset.originalFileName or (warning.path and LrPathUtils.leafName(warning.path))
+		if asset.type == 'VIDEO' then videoCount = videoCount + 1 end
+		local leaf = (asset.originalFileName and asset.originalFileName ~= '')
+			and asset.originalFileName
+			or (warning.path and LrPathUtils.leafName(warning.path))
 		table.insert(entries, {
 			assetId = warning.assetId,
-			fileName = sanitizeFileName(leaf, warning.assetId .. '.jpg'),
+			fileName = Dialogs.sanitizeFileName(leaf, tostring(warning.assetId) .. '.jpg'),
 			originalPath = warning.path,
 		})
 	end
-	return entries
+	return entries, videoCount
 end
 
-local function promptDownloadFolder(context, f, count)
+local function ensureDirectory(folder)
+	if not folder or folder == '' then
+		return false, 'No download folder selected.'
+	end
+	local exists = LrFileUtils.exists(folder)
+	if exists == 'directory' then
+		return true, nil
+	elseif exists then
+		return false, 'Selected path exists and is not a directory: ' .. folder
+	end
+	local created = LrFileUtils.createAllDirectories(folder)
+	if created or LrFileUtils.exists(folder) == 'directory' then
+		return true, nil
+	end
+	return false, 'Could not create download folder: ' .. folder
+end
+
+local function promptDownloadFolder(context, f, count, videoCount)
 	local props = LrBinding.makePropertyTable(context)
 	props.folder = defaultDownloadFolder()
+
+	local bodyText = 'You can download the original files from Immich, save them to a folder, import them into the Lightroom catalog, and add them to this collection. Cancel skips downloading and applies only mapped changes.'
+	if videoCount > 0 then
+		bodyText = bodyText .. ('\n\nNote: %d of these unmapped assets %s video%s. Large videos are buffered in memory during download and may take longer or fail if very large.'):format(
+			videoCount, videoCount == 1 and 'is a' or 'are', videoCount == 1 and '' or 's')
+	end
 
 	local contents = f:column {
 		spacing = f:control_spacing(),
@@ -113,9 +137,9 @@ local function promptDownloadFolder(context, f, count)
 			font = '<system/bold>',
 		},
 		f:static_text {
-			title = 'You can download the original files from Immich Collection Sync, save them to a folder, import them into the Lightroom catalog, and add them to this collection. Cancel skips downloading and applies only mapped changes.',
+			title = bodyText,
 			width_in_chars = 72,
-			height_in_lines = 4,
+			height_in_lines = videoCount > 0 and 6 or 4,
 		},
 		f:row {
 			f:static_text { title = 'Save to', width = 80 },
@@ -142,12 +166,179 @@ local function promptDownloadFolder(context, f, count)
 		actionVerb = 'Download & import',
 	}
 	if result ~= 'ok' then return nil end
-	if not props.folder or props.folder == '' then
-		LrDialogs.message('Immich Collection Sync', 'No download folder selected; skipping downloads.', 'warning')
+
+	local okDir, dirErr = ensureDirectory(props.folder)
+	if not okDir then
+		LrDialogs.message('Immich Collection Sync', dirErr .. '\nSkipping downloads.', 'warning')
 		return nil
 	end
 	Settings.setDownloadFolder(props.folder)
 	return props.folder
+end
+
+local function buildPreviewText(ctx)
+	local direction = ctx.direction
+	local album = ctx.album or {}
+	local albumName = ctx.albumName or ''
+	local collectionName = ctx.collectionName or ''
+	local diff = ctx.diff
+	local pathMappings = ctx.pathMappings or {}
+	local catalogSize = ctx.catalogSize or 0
+	local logEnabled = ctx.logEnabled == true
+
+	local fetchedAssets = #(album.assets or {})
+	local reportedCount = tonumber(album.assetCount)
+	local lines = {}
+	local function addLine(s) table.insert(lines, s) end
+
+	addLine(('Collection: %s (%d photo%s in collection; %d in LR catalog)'):format(
+		collectionName,
+		diff.summary.collectionPhotoCount or 0,
+		(diff.summary.collectionPhotoCount or 0) == 1 and '' or 's',
+		catalogSize))
+	if reportedCount ~= nil then
+		addLine(('Immich album: %s (%d asset%s fetched; Immich reports assetCount=%d)'):format(
+			albumName, fetchedAssets, fetchedAssets == 1 and '' or 's', reportedCount))
+	else
+		addLine(('Immich album: %s (%d asset%s fetched)'):format(
+			albumName, fetchedAssets, fetchedAssets == 1 and '' or 's'))
+	end
+	addLine(('Direction: %s'):format(direction == 'lr_to_immich'
+		and 'Lightroom → Immich' or 'Immich → Lightroom'))
+	addLine(('Matched on both sides: %d'):format(diff.summary.matchedCount or 0))
+	if #pathMappings == 0 then
+		addLine('Active path mappings: NONE configured (configure in File > Plug-in Manager… > Immich Collection Sync)')
+	else
+		local mapSummaries = {}
+		for _, m in ipairs(pathMappings) do
+			table.insert(mapSummaries, ('%s → %s'):format(m.immich or '?', m.local_ or '?'))
+		end
+		addLine(('Active path mappings (%d): %s'):format(#pathMappings, table.concat(mapSummaries, ', ')))
+	end
+	addLine('')
+
+	if reportedCount and reportedCount > 0 and fetchedAssets == 0 then
+		addLine(('DIAGNOSTIC: Immich reports %d asset%s in "%s", but returned 0 asset records!'):format(
+			reportedCount, reportedCount == 1 and '' or 's', albumName))
+		if album._assetsFallbackError then
+			addLine('  Fallback POST /api/search/metadata failed: ' .. Errors.format(album._assetsFallbackError))
+		end
+		addLine('  Likely causes:')
+		addLine('  • Your Immich API key is missing permissions (needs album.read + asset.read)')
+		addLine('  • This is a shared album whose assets are not visible to this API key')
+		addLine('  • Enable Debug logging in Plug-in Manager and re-run to inspect ImmichSync.log')
+		addLine('')
+	elseif fetchedAssets == 0 and (diff.summary.collectionPhotoCount or 0) == 0 then
+		addLine('Note: Both the Immich album (0 assets) and the Lightroom collection (0 photos) are empty.')
+		addLine('')
+	end
+
+	if direction == 'lr_to_immich' then
+		addLine(('Add to Immich album:      %d'):format(#diff.toAddRemote))
+		addLine(('Remove from Immich album: %d'):format(#diff.toRemoveRemote))
+	else
+		addLine(('Import into Lightroom catalog:    %d'):format(#(diff.toImportLocal or {})))
+		addLine(('Add to Lightroom collection:      %d'):format(#diff.toAddLocal + #(diff.toImportLocal or {})))
+		addLine(('Remove from Lightroom collection: %d'):format(#diff.toRemoveLocal))
+	end
+
+	addLine('')
+	addLine(('Warnings: %d'):format(diff.summary.warningCount))
+	if direction == 'immich_to_lr' and #(diff.warnings.unmappableImmich or {}) > 0 then
+		addLine(('Download option after Apply: %d unmapped Immich asset%s'):format(
+			#diff.warnings.unmappableImmich,
+			#diff.warnings.unmappableImmich == 1 and '' or 's'))
+	end
+
+	local function appendWarnings(list, label, formatFn, limit)
+		limit = limit or 20
+		for i, w in ipairs(list or {}) do
+			if i <= limit then addLine(('  %s: %s'):format(label, formatFn(w))) end
+		end
+		if list and #list > limit then
+			addLine(('  … and %d more %s'):format(#list - limit, label))
+		end
+	end
+
+	if diff.summary.warningCount > 0 then
+		appendWarnings(diff.warnings.unmappableImmich, 'unmapped Immich path',
+			function(w) return tostring(w.path or w.assetId or '?') end)
+		appendWarnings(diff.warnings.missingLocal, 'missing locally', function(w)
+			if w.immichPath and w.localPath then
+				return ('%s  →  %s'):format(w.immichPath, w.localPath)
+			end
+			return tostring(w.localPath or w.photoPath or '?')
+		end)
+		appendWarnings(diff.warnings.missingRemote, 'not found on Immich', function(w)
+			if w.immichPath then
+				return ('%s  (LR: %s)'):format(w.immichPath, tostring(w.photoPath or '?'))
+			end
+			return tostring(w.photoPath or '?')
+		end)
+		appendWarnings(diff.warnings.unmappableLocal, 'LR photo outside any mapping',
+			function(w) return tostring(w.photoPath or '?') end)
+		appendWarnings(diff.warnings.duplicateLocal, 'duplicate catalog path',
+			function(w) return tostring(w.localPath or '?') end)
+	end
+
+	addLine('')
+	if logEnabled then
+		addLine('Debug log: ' .. Logger.logFilePath())
+	else
+		addLine('Tip: Enable "Debug logging" in File > Plug-in Manager… > Immich Collection Sync for detailed logs.')
+	end
+
+	return table.concat(lines, '\n')
+end
+
+local function presentPreviewDialog(context, f, previewText, hasChanges, hasDiagnostics)
+	local props = LrBinding.makePropertyTable(context)
+	props.preview = previewText
+
+	local heading
+	local title
+	if hasChanges then
+		title = 'Immich Collection Sync — Preview'
+		heading = 'Review the planned changes below before applying.'
+	elseif hasDiagnostics then
+		title = 'Immich Collection Sync — Nothing to apply (check warnings)'
+		heading = 'No changes can be applied yet — see diagnostics/warnings below.'
+	else
+		title = 'Immich Collection Sync — Already in sync'
+		heading = 'Collection and album are already in sync (no changes to apply).'
+	end
+
+	local contents = f:column {
+		spacing = f:control_spacing(),
+		bind_to_object = props,
+		f:static_text {
+			title = heading,
+			font = '<system/bold>',
+		},
+		f:edit_field {
+			value = LrView.bind 'preview',
+			width_in_chars = 88,
+			height_in_lines = 20,
+			enabled = true,
+		},
+	}
+
+	if not hasChanges then
+		LrDialogs.presentModalDialog{
+			title = title,
+			contents = contents,
+			actionVerb = 'Close',
+			cancelVerb = '< exclude >',
+		}
+		return 'cancel'
+	end
+
+	return LrDialogs.presentModalDialog{
+		title = title,
+		contents = contents,
+		actionVerb = 'Apply',
+		cancelVerb = 'Cancel',
+	}
 end
 
 LrFunctionContext.postAsyncTaskWithContext('ImmichSyncDialog', function(context)
@@ -158,53 +349,34 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSyncDialog', function(context)
 		return
 	end
 
-	local store = MappingStore.new(LrPrefs.prefsForPlugin())
+	local catalog = LrApplication.activeCatalog()
+	local store = MappingStore.new(LrPrefs.prefsForPlugin(), { catalogId = Dialogs.catalogId(catalog) })
 	local link = store:get(collection.localIdentifier)
 	if not link then
 		LrDialogs.message('Immich Collection Sync',
-			'This collection is not linked. Use Library > Plug-in Extras > Immich Collection Sync: Link selected collection… first.',
+			'This collection is not linked. Use Library > Plug-in Extras > Immich Collection Sync: Link selected collection to album… first.',
 			'info')
 		return
 	end
 
-	local catalog = LrApplication.activeCatalog()
-	local progress = LrProgressScope{
-		title = ('Immich Collection Sync: %s'):format(collection:getName()),
-		functionContext = context,
-	}
-	progress:setCancelable(true)
-
-	progress:setCaption('Fetching Immich album…')
-	local api = ImmichAPI.new{
-		serverUrl = Settings.getServerUrl(),
-		apiKey = Settings.getApiKey(),
-	}
-	local album, err = api:getAlbum(link.albumId)
-	if err then
-		progress:done()
-		LrDialogs.message('Immich Collection Sync', 'Failed to fetch album: ' .. Errors.format(err), 'critical')
-		return
-	end
-	local assetById = {}
-	for _, asset in ipairs(album.assets or {}) do
-		if asset.id then assetById[asset.id] = asset end
+	-- Warn if the plugin's server URL has changed since this collection was linked.
+	local configuredUrl = Settings.getServerUrl()
+	if link.serverUrl and link.serverUrl ~= ''
+		and Dialogs.normalizeServerUrl(link.serverUrl) ~= Dialogs.normalizeServerUrl(configuredUrl) then
+		local proceed = LrDialogs.confirm(
+			'Immich Collection Sync — Server URL changed',
+			('This collection was linked on "%s", but the configured server is now "%s".\n\nContinue syncing with the current server, or cancel and re-link the collection?'):format(
+				link.serverUrl, configuredUrl),
+			'Continue', 'Cancel')
+		if proceed ~= 'ok' then return end
 	end
 
-	progress:setCaption('Indexing Lightroom catalog…')
-	local allPhotos = catalog:getAllPhotos()
-	local caseFold = function(p) return Paths.foldForCompare(Paths.normalizeSeparators(p) or '') end
-	local catalogIndex = CatalogIndex.new(allPhotos, caseFold)
+	local f = LrView.osFactory()
 
-	progress:setCaption('Reading collection…')
-	local collectionPhotos = collection:getPhotos()
-
-	local pathMapper = PathMapper.new(Settings.getPathMappings())
-
-	-- Ask direction.
-	progress:setCaption('Waiting for direction selection…')
+	-- Ask direction FIRST so clicking Cancel does not waste time fetching the
+	-- album or indexing a large Lightroom catalog.
 	local properties = LrBinding.makePropertyTable(context)
 	properties.direction = 'immich_to_lr'
-	local f = LrView.osFactory()
 	local directionDialog = f:column {
 		spacing = f:control_spacing(),
 		bind_to_object = properties,
@@ -226,70 +398,126 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSyncDialog', function(context)
 		contents = directionDialog,
 		actionVerb = 'Analyze',
 	}
-	if choice ~= 'ok' then progress:done(); return end
+	if choice ~= 'ok' then return end
+
+	Logger.info(('Starting sync (%s) for collection "%s" (id=%s) <-> album "%s" (id=%s)'):format(
+		properties.direction, collection:getName(), tostring(collection.localIdentifier),
+		tostring(link.albumName or ''), tostring(link.albumId)))
+
+	local progress = LrProgressScope{
+		title = ('Immich Collection Sync: %s'):format(collection:getName()),
+		functionContext = context,
+	}
+	progress:setCancelable(true)
+
+	local progressAdapter = {
+		setCaption = function(s) progress:setCaption(s) end,
+		setPortionComplete = function(done, total) progress:setPortionComplete(done, total) end,
+		isCanceled = function() return progress:isCanceled() end,
+	}
+
+	progress:setCaption('Fetching Immich album…')
+	local api = ImmichAPI.new{
+		serverUrl = configuredUrl,
+		apiKey = Settings.getApiKey(),
+		logger = Logger,
+	}
+	local album, err = api:getAlbum(link.albumId)
+	if err then
+		progress:done()
+		Logger.error('Failed to fetch album: ' .. Errors.format(err))
+		LrDialogs.message('Immich Collection Sync', 'Failed to fetch album: ' .. Errors.format(err), 'critical')
+		return
+	end
+	if progress:isCanceled() then progress:done(); return end
+
+	-- Refresh stored albumName if the album was renamed in Immich.
+	local liveAlbumName = (album.albumName and album.albumName ~= '') and album.albumName or (link.albumName or '')
+	if liveAlbumName ~= '' and liveAlbumName ~= link.albumName then
+		store:set(collection.localIdentifier, {
+			albumId = link.albumId,
+			albumName = liveAlbumName,
+			serverUrl = link.serverUrl ~= '' and link.serverUrl or configuredUrl,
+			linkedAt = link.linkedAt,
+		})
+	end
+
+	local assetById = {}
+	for _, asset in ipairs(album.assets or {}) do
+		if asset.id then assetById[asset.id] = asset end
+	end
+
+	progress:setCaption('Indexing Lightroom catalog…')
+	local caseFold = function(p) return Paths.normalizeKey(p or '') end
+	local catalogIndex, indexErr = CatalogIndex.buildFromCatalog(catalog, caseFold, progressAdapter)
+	if not catalogIndex then
+		progress:done()
+		if indexErr ~= 'canceled' then
+			Logger.error('Catalog indexing failed: ' .. tostring(indexErr))
+		end
+		return
+	end
+
+	progress:setCaption('Reading collection…')
+	local collectionPhotos = collection:getPhotos()
+	if progress:isCanceled() then progress:done(); return end
+
+	local configuredMappings = Settings.getPathMappings()
+	local pathMapper = PathMapper.new(configuredMappings)
+	local downloadedPaths = store:getDownloadedAssets()
+
+	Logger.info(('Album "%s" fetched: inline/total=%d assetCount=%s source=%s; catalog=%d; collection=%d; mappings=%d'):format(
+		liveAlbumName, #(album.assets or {}), tostring(album.assetCount),
+		tostring(album._assetsSource or 'unknown'), catalogIndex:size(),
+		#(collectionPhotos or {}), #configuredMappings))
 
 	progress:setCaption('Computing diff…')
-	local diff = SyncEngine.computeDiff{
+	local diff, diffErr = SyncEngine.computeDiff{
 		direction = properties.direction,
 		collectionPhotos = collectionPhotos,
 		albumAssets = album.assets or {},
 		pathMapper = pathMapper,
 		catalogIndex = catalogIndex,
 		fileExists = function(path) return LrFileUtils.exists(path) end,
+		downloadedPaths = downloadedPaths,
+		resolveRemoteAsset = properties.direction == 'lr_to_immich'
+			and function(immichPath) return api:findAssetByOriginalPath(immichPath) end
+			or nil,
+		progress = progressAdapter,
 	}
-
-	-- Preview.
-	local previewLines = {}
-	local function addLine(s) table.insert(previewLines, s) end
-	addLine(('Direction: %s'):format(properties.direction == 'lr_to_immich'
-		and 'Lightroom → Immich' or 'Immich → Lightroom'))
-	addLine('')
-	if properties.direction == 'lr_to_immich' then
-		addLine(('Add to Immich Collection Sync album:    %d'):format(#diff.toAddRemote))
-		addLine(('Remove from Immich Collection Sync album: %d'):format(#diff.toRemoveRemote))
-	else
-		addLine(('Import into Lightroom catalog:   %d'):format(#(diff.toImportLocal or {})))
-		addLine(('Add to Lightroom collection:    %d'):format(#diff.toAddLocal + #(diff.toImportLocal or {})))
-		addLine(('Remove from Lightroom collection: %d'):format(#diff.toRemoveLocal))
-	end
-	addLine('')
-	addLine(('Warnings: %d'):format(diff.summary.warningCount))
-	if properties.direction == 'immich_to_lr' and #(diff.warnings.unmappableImmich or {}) > 0 then
-		addLine(('Download option after Apply: %d unmapped Immich asset%s'):format(
-			#diff.warnings.unmappableImmich,
-			#diff.warnings.unmappableImmich == 1 and '' or 's'))
-	end
-	if diff.summary.warningCount > 0 then
-		for i, w in ipairs(diff.warnings.unmappableImmich) do
-			if i <= 5 then addLine(('  unmapped Immich path: %s'):format(w.path)) end
-		end
-		if #diff.warnings.unmappableImmich > 5 then
-			addLine(('  … and %d more unmapped Immich paths'):format(#diff.warnings.unmappableImmich - 5))
-		end
-		for i, w in ipairs(diff.warnings.missingLocal) do
-			if i <= 5 then addLine(('  missing locally: %s'):format(w.localPath or w.photoPath or '?')) end
-		end
-		if #diff.warnings.missingLocal > 5 then
-			addLine(('  … and %d more missing-local'):format(#diff.warnings.missingLocal - 5))
-		end
-		for i, w in ipairs(diff.warnings.unmappableLocal) do
-			if i <= 5 then addLine(('  LR photo outside any mapping: %s'):format(w.photoPath)) end
-		end
-		if #diff.warnings.unmappableLocal > 5 then
-			addLine(('  … and %d more LR-path warnings'):format(#diff.warnings.unmappableLocal - 5))
-		end
+	if not diff then
+		progress:done()
+		if diffErr == 'canceled' then Logger.info('Sync canceled during analysis') end
+		return
 	end
 
+	Logger.info(('Diff computed: add=%d remove=%d matched=%d warnings=%d'):format(
+		diff.summary.addCount, diff.summary.removeCount,
+		diff.summary.matchedCount or 0, diff.summary.warningCount))
+
+	local hasUnmappedDownloads = properties.direction == 'immich_to_lr'
+		and #(diff.warnings.unmappableImmich or {}) > 0
+	local hasChanges = diff.summary.addCount > 0 or diff.summary.removeCount > 0 or hasUnmappedDownloads
+	local hasDiagnostics = diff.summary.warningCount > 0
+		or ((tonumber(album.assetCount) or 0) > 0 and #(album.assets or {}) == 0)
+
+	local previewText = buildPreviewText{
+		direction = properties.direction,
+		album = album,
+		albumName = liveAlbumName,
+		collectionName = collection:getName(),
+		diff = diff,
+		pathMappings = configuredMappings,
+		catalogSize = catalogIndex:size(),
+		logEnabled = Settings.getLogEnabled(),
+	}
 	progress:setCaption('Waiting for confirmation…')
-	local previewChoice = LrDialogs.confirm(
-		'Immich Collection Sync — Preview',
-		table.concat(previewLines, '\n'),
-		'Apply', 'Cancel')
+	local previewChoice = presentPreviewDialog(context, f, previewText, hasChanges, hasDiagnostics)
 	if previewChoice ~= 'ok' then progress:done(); return end
 
-	if properties.direction == 'immich_to_lr' and #(diff.warnings.unmappableImmich or {}) > 0 then
-		local entries = downloadEntriesFromWarnings(diff, assetById)
-		local folder = promptDownloadFolder(context, f, #entries)
+	if hasUnmappedDownloads then
+		local entries, videoCount = downloadEntriesFromWarnings(diff, assetById)
+		local folder = promptDownloadFolder(context, f, #entries, videoCount)
 		if folder then
 			diff.toDownloadLocal = entries
 			diff.downloadFolder = folder
@@ -305,46 +533,62 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSyncDialog', function(context)
 		collection = collection,
 		fileExists = function(path) return LrFileUtils.exists(path) end,
 		importPhotos = function(paths)
-			return CatalogImport.importPhotos(catalog, paths)
+			return CatalogImport.importPhotos(catalog, paths, {
+				yieldSafePcall = function(fn, ...) return LrTasks.pcall(fn, ...) end,
+				progress = progressAdapter,
+			})
 		end,
 		downloadAsset = function(assetId)
 			return api:downloadAsset(assetId)
 		end,
 		saveDownloadedAsset = function(entry, bytes)
 			local folder = diff.downloadFolder or Settings.getDownloadFolder()
-			if folder == '' then
-				return nil, Errors.make('download_folder_missing', 'No download folder selected')
+			local okDir, dirErr = ensureDirectory(folder)
+			if not okDir then
+				return nil, Errors.make('download_folder_missing', dirErr)
 			end
-			local path = uniqueChildPath(folder, sanitizeFileName(entry.fileName, entry.assetId .. '.jpg'))
+			local path = uniqueChildPath(folder, Dialogs.sanitizeFileName(entry.fileName, tostring(entry.assetId) .. '.jpg'))
 			return writeBinary(path, bytes)
 		end,
+		onAssetDownloaded = function(assetId, localPath)
+			store:setDownloadedAsset(assetId, localPath)
+		end,
 		withWriteAccess = function(name, fn)
-			catalog:withWriteAccessDo(name, fn)
+			return catalog:withWriteAccessDo(name, fn, { timeout = 15 })
 		end,
 		yieldSafePcall = function(fn, ...)
 			return LrTasks.pcall(fn, ...)
 		end,
-		progress = {
-			setCaption = function(s) progress:setCaption(s) end,
-			isCanceled = function() return progress:isCanceled() end,
-		},
+		progress = progressAdapter,
 	})
 	progress:done()
 
+	Logger.info(('Sync finished: addedRemote=%d removedRemote=%d downloaded=%d imported=%d addedLocal=%d removedLocal=%d errors=%d canceled=%s'):format(
+		result.addedRemote, result.removedRemote, result.downloadedLocal or 0,
+		result.importedLocal or 0, result.addedLocal, result.removedLocal,
+		#result.errors, tostring(result.canceled)))
+
 	local lines = {
-		('Added to Immich Collection Sync Collection Sync:     %d'):format(result.addedRemote),
-		('Removed from Immich Collection Sync Collection Sync: %d'):format(result.removedRemote),
-		('Downloaded:         %d'):format(result.downloadedLocal or 0),
+		('Added to Immich:     %d'):format(result.addedRemote),
+		('Removed from Immich: %d'):format(result.removedRemote),
+		('Downloaded:          %d'):format(result.downloadedLocal or 0),
 		('Imported to LR:      %d'):format(result.importedLocal or 0),
 		('Added to LR:         %d'):format(result.addedLocal),
 		('Removed from LR:     %d'):format(result.removedLocal),
 	}
+	if result.canceled then
+		table.insert(lines, '')
+		table.insert(lines, 'Sync was canceled before all steps completed.')
+	end
 	if #result.errors > 0 then
 		table.insert(lines, '')
 		table.insert(lines, 'Errors:')
 		for _, e in ipairs(result.errors) do
-			table.insert(lines, ('  [%s] %s'):format(e.op, Errors.format(e.err)))
+			local formatted = ('  [%s] %s'):format(e.op, Errors.format(e.err))
+			Logger.error('Sync error: ' .. formatted)
+			table.insert(lines, formatted)
 		end
 	end
-	LrDialogs.message('Immich Collection Sync — done', table.concat(lines, '\n'), 'info')
+	LrDialogs.message('Immich Collection Sync — done', table.concat(lines, '\n'),
+		#result.errors > 0 and 'warning' or 'info')
 end)

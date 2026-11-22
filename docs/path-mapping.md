@@ -32,7 +32,7 @@ Looking up `/upload/library/2024/IMG_1.jpg` yields
 The host OS decides. macOS and Windows are case-insensitive (HFS+/APFS
 default, NTFS default); Linux is case-sensitive. We fold **only** for
 comparison; the original-case paths are always the ones we return.
-`util.Paths._setOS(os)` lets tests pin the behavior.
+`Paths._setOS(os)` lets tests pin the behavior.
 
 ## Separator normalization
 
@@ -47,7 +47,7 @@ dropped**. Typical causes:
 
 - An external library whose Immich prefix is not configured.
 - Local photos that live outside any mapping (e.g. on an internal SSD
-  unrelated to Immich Collection Sync).
+  unrelated to Immich).
 - A mapping typo.
 
 Fix by adding a mapping in the Plugin Manager settings and re-running.
@@ -61,20 +61,20 @@ the collection.
 ### Typical Docker + NFS setup
 
 ```text
-Mapping: uploaded   /data/library/   /Volumes/nas/immich/library/
+Mapping: uploaded   /data/   /Volumes/nas/immich/
 
-Immich path:  /data/library/sebastian/2024-04/IMG_42.jpg
-Local path:   /Volumes/nas/immich/library/sebastian/2024-04/IMG_42.jpg
+Immich path:  /data/library/alice/2024-04/IMG_42.jpg
+Local path:   /Volumes/nas/immich/library/alice/2024-04/IMG_42.jpg
 ```
 
-Usually this **one global uploaded-library mapping** covers all users and
-storage labels below `/data/library/`. You only need per-user rows when those
+Usually this **one global `/data/` mapping** covers all uploaded assets
+(both `/data/library/` and `/data/upload/`). You only need per-user rows when
 subfolders are mounted from different host locations. Longest-prefix matching
 lets a per-user row override the global row:
 
 ```text
-uploaded      /data/library/             /Volumes/nas/immich/library/
-sebastian-ssd /data/library/sebastian/   /Volumes/fast-ssd/sebastian/
+uploaded   /data/                 /Volumes/nas/immich/
+alice-ssd  /data/library/alice/   /Volumes/fast-ssd/alice/
 ```
 
 ### Two external libraries
@@ -99,7 +99,7 @@ internal    /home/me/immich-library/   /home/me/immich-library/
 
 Identical prefixes are legal; the mapping just passes through.
 
-## Discovering libraries from Immich Collection Sync
+## Discovering libraries from Immich
 
 Immich External Libraries can have one or more `importPaths` — each is a path
 the Immich process scans for photos. The plugin can fetch these automatically.
@@ -117,10 +117,11 @@ adds common uploaded/user-library roots itself.
 4. Click **Save mappings**. The Plugin Manager then shows a read-only summary of
   the saved mappings.
 
-For current Docker installs, map `/data/library/` to the host folder behind
-`${UPLOAD_LOCATION}/library`. For older installs, map
-`/usr/src/app/upload/library/`. A single `/data/library/` row is usually the
-right answer for all users; use per-user rows only as overrides.
+For current Docker installs, map `/data/` to the host folder behind
+`${UPLOAD_LOCATION}` (this automatically covers both `/data/library/` and
+`/data/upload/`). For older installs, map `/usr/src/app/upload/`. A single
+`/data/` row is usually the right answer for all users; use per-user rows only
+as overrides.
 
 The ideal setup remains: **one physical photo on your NAS, referenced from both
 Immich and Lightroom**. The download fallback is for cases where a path is truly

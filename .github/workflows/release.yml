@@ -35,6 +35,19 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           custom_tag: ${{ inputs.tag }}
+      - name: Install LuaJIT & run tests
+        run: |
+          sudo apt-get update && sudo apt-get install -y luajit
+          ./test.sh
+      - name: Sync Info.lua VERSION with release tag
+        run: |
+          TAG="${{ steps.tag_version.outputs.new_tag }}"
+          TAG="${TAG#v}"
+          IFS='.' read -r MAJOR MINOR REV <<< "$TAG"
+          MAJOR="${MAJOR:-4}"
+          MINOR="${MINOR:-0}"
+          REV="${REV:-0}"
+          sed -i "s/VERSION = { major = [0-9]*, minor = [0-9]*, revision = [0-9]*, build = [0-9]* }/VERSION = { major = ${MAJOR}, minor = ${MINOR}, revision = ${REV}, build = 0 }/" src/Info.lua
       - name: Build plugin
         run: ./build.sh
       - name: Zip it up

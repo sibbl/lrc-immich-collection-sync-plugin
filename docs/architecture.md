@@ -81,10 +81,10 @@ menu/LinkCollectionDialog.lua  menu/UnlinkAction.lua       menu/SyncDialog.lua
 
 ### Infrastructure
 
-- **util/Paths** — pure path helpers. Tested.
-- **util/Logger** — thin LrLogger wrapper.
-- **util/Errors** — structured error type + renderer.
-- **vendor/JSON.lua**, **vendor/inspect.lua** — upstream-maintained libs.
+- **Paths** — pure path helpers. Tested.
+- **Logger** — thin LrLogger wrapper.
+- **Errors** — structured error type + renderer.
+- **JSON.lua** — upstream-maintained JSON encoder/decoder.
 
 ## Why no Publish Service?
 

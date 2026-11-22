@@ -53,7 +53,7 @@ by menu items under `Library > Plug-in Extras > Immich Collection Sync: …`.
 - Menu scripts under `src/menu/` are thin. They orchestrate dialogs and
   delegate to the pure modules above.
 - No `printf`-style error reporting. Use the `(value, err)` convention
-  where `err` is an `util.Errors.make(code, message, details)` table.
+  where `err` is an `Errors.make(code, message, details)` table.
 
 ## Scope discipline
 

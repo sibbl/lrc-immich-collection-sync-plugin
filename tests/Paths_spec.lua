@@ -1,6 +1,6 @@
 local Paths = require 'Paths'
 
-describe('util.Paths', function()
+describe('Paths', function()
 	it('loads when Lightroom hides package/io globals', function()
 		local oldPackage = package
 		local oldIo = io
@@ -26,10 +26,20 @@ describe('util.Paths', function()
 		assertEq(Paths.stripTrailingSlash('/'), '/')
 	end)
 
-	it('asPrefix ends with exactly one slash', function()
+	it('asPrefix ends with exactly one slash and handles nil/empty/multi-slash', function()
 		assertEq(Paths.asPrefix('/a/b'), '/a/b/')
 		assertEq(Paths.asPrefix('/a/b/'), '/a/b/')
+		assertEq(Paths.asPrefix('/a/b///'), '/a/b/')
 		assertEq(Paths.asPrefix('C:\\x'), 'C:/x/')
+		assertNil(Paths.asPrefix(nil))
+		assertNil(Paths.asPrefix(''))
+	end)
+
+	it('normalizeKey combines separator normalization and case folding', function()
+		Paths._setOS('windows')
+		assertEq(Paths.normalizeKey('D:\\Photos\\IMG.JPG'), 'd:/photos/img.jpg')
+		Paths._setOS('linux')
+		assertEq(Paths.normalizeKey('/Photos/IMG.JPG'), '/Photos/IMG.JPG')
 	end)
 
 	it('startsWith respects case sensitivity on linux', function()

@@ -25,9 +25,11 @@ function M.error(msg) logger:error(tostring(msg)) end
 function M.trace(msg) logger:trace(tostring(msg)) end
 
 function M.logFilePath()
-	-- LrLogger writes to <preferences>/LrClassicLogs/<name>.log on recent LR versions.
+	-- LrLogger writes to <documents>/LrClassicLogs/<name>.log on recent LR versions.
+	-- Use nested LrPathUtils.child calls so separators are native on Windows too.
 	local dir = LrPathUtils.getStandardFilePath('documents')
-	return LrPathUtils.child(dir, 'LrClassicLogs/ImmichSync.log')
+	local logDir = LrPathUtils.child(dir, 'LrClassicLogs')
+	return LrPathUtils.child(logDir, 'ImmichSync.log')
 end
 
 return M

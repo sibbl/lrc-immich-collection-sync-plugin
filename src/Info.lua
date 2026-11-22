@@ -2,9 +2,10 @@
   Immich Collection Sync — Lightroom Classic plugin manifest.
 
   This plugin provides bidirectional membership sync between an Immich album
-  and a Lightroom Classic collection. It does NOT upload or download any
-  photo files — both sides are expected to see the same files, with a user
-  configured path-prefix mapping in place.
+  and a Lightroom Classic collection. Normally both sides reference the same
+  physical files on disk through user-configured path-prefix mappings; an
+  optional confirmation-gated download fallback is available for unmapped
+  assets during Immich → Lightroom sync.
 
   Menu-driven (no Publish Service), because the Lightroom Publish SDK does
   not fire callbacks when a user drags photos in/out of a published

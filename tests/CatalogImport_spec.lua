@@ -11,9 +11,10 @@ describe('CatalogImport', function()
 			end,
 		}
 
-		local result = CatalogImport.importPhotos(catalog, { '/a.jpg' })
+		local result, failures = CatalogImport.importPhotos(catalog, { '/a.jpg' })
 		assertEq(calledWith[1], '/a.jpg')
 		assertEq(result[1], photo)
+		assertEq(#failures, 0)
 	end)
 
 	it('falls back to catalog:addPhoto one file at a time', function()
@@ -25,11 +26,29 @@ describe('CatalogImport', function()
 			end,
 		}
 
-		local result = CatalogImport.importPhotos(catalog, { '/a.jpg', '/b.jpg' })
+		local result, failures = CatalogImport.importPhotos(catalog, { '/a.jpg', '/b.jpg' })
 		assertDeepEq(calls, { '/a.jpg', '/b.jpg' })
 		assertEq(#result, 2)
+		assertEq(#failures, 0)
 		assertEq(result[1].path, '/a.jpg')
 		assertEq(result[2].path, '/b.jpg')
+	end)
+
+	it('isolates per-file addPhoto errors without losing earlier imports', function()
+		local catalog = {
+			addPhoto = function(self, path)
+				if path == '/bad.mov' then error('unsupported format') end
+				return { path = path }
+			end,
+		}
+
+		local result, failures = CatalogImport.importPhotos(catalog, { '/a.jpg', '/bad.mov', '/c.jpg' })
+		assertEq(#result, 2)
+		assertEq(result[1].path, '/a.jpg')
+		assertEq(result[2].path, '/c.jpg')
+		assertEq(#failures, 1)
+		assertEq(failures[1].path, '/bad.mov')
+		assertTrue(failures[1].err:match('unsupported format') ~= nil)
 	end)
 
 	it('raises a clear error when no catalog import API exists', function()

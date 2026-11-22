@@ -78,13 +78,18 @@ end
 -- Ensure a directory-style path ends with exactly one '/'.
 function M.ensureTrailingSlash(p)
 	if p == nil or p == '' then return '/' end
-	if p:sub(-1) == '/' then return p end
-	return p .. '/'
+	local stripped = M.stripTrailingSlash(p)
+	if stripped == '/' then return '/' end
+	return stripped .. '/'
 end
 
 -- Canonical form for prefix comparison: forward slashes, single trailing slash.
+-- Returns nil for nil or empty input so callers never accidentally match '/'.
 function M.asPrefix(p)
-	return M.ensureTrailingSlash(M.normalizeSeparators(p))
+	if p == nil or p == '' then return nil end
+	local normalized = M.normalizeSeparators(p)
+	if normalized == '' then return nil end
+	return M.ensureTrailingSlash(normalized)
 end
 
 -- Fold case if host OS is case-insensitive. Used only for COMPARISON, never
@@ -93,6 +98,12 @@ function M.foldForCompare(p)
 	if p == nil then return nil end
 	if M.isCaseInsensitive() then return p:lower() end
 	return p
+end
+
+-- Canonical comparison key: forward slashes + OS-appropriate case folding.
+function M.normalizeKey(p)
+	if p == nil then return nil end
+	return M.foldForCompare(M.normalizeSeparators(p))
 end
 
 -- Does `full` start with `prefix` (both already normalized)? Case-insensitive

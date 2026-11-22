@@ -1,10 +1,11 @@
 --[[
   PluginInfoProvider — Plugin Manager settings UI.
 
-  Shows server URL, API key, "Test connection" button, and chooser-based path
-	mappings (Immich prefix <-> Local prefix) with a read-only summary in the
-	Plugin Manager. No per-preset settings
-  because this plugin registers no Export/Publish services.
+  Shows server URL, API key (with plaintext storage notice), "Test connection"
+  button, chooser-based path mappings (Immich prefix <-> Local prefix) plus an
+  "Add custom mapping…" dialog, read-only mapping summary, and diagnostics.
+  No per-preset settings because this plugin registers no Export/Publish
+  services.
 ]]
 
 local LrView = import 'LrView'
@@ -12,6 +13,8 @@ local LrBinding = import 'LrBinding'
 local LrDialogs = import 'LrDialogs'
 local LrFunctionContext = import 'LrFunctionContext'
 local LrShell = import 'LrShell'
+local LrFileUtils = import 'LrFileUtils'
+local LrPathUtils = import 'LrPathUtils'
 
 local Settings = require 'Settings'
 local ImmichAPI = require 'ImmichAPI'
@@ -25,10 +28,10 @@ local function updateMappingSummary(propertyTable, mappings)
 	propertyTable.mappingSummary = PathMappingChoices.summarizeMappings(mappings)
 end
 
--- Modal dialog: shows each Immich library and its importPaths with an
--- browse-only local-folder picker. On OK we replace the persisted pathMappings
--- with the chosen rows. Must be invoked
--- inside an LrFunctionContext so the property table has an owner.
+-- Modal dialog: shows built-in Immich upload roots, external library
+-- importPaths, and any previously saved mappings with browse-only local-folder
+-- pickers inside a scrollable container. On OK we replace the persisted
+-- pathMappings with the chosen rows.
 local function presentLibraryMappingDialog(context, f, libraries, currentMappings, dialogNotice)
 	local model = PathMappingChoices.buildRows(libraries, currentMappings)
 	local rows = model.rows
@@ -42,15 +45,25 @@ local function presentLibraryMappingDialog(context, f, libraries, currentMapping
 
 	if #rows == 0 then
 		LrDialogs.message('No libraries found',
-			'No path-mappable Immich roots are available yet. Check the server settings or try again after Immich reports libraries.', 'info')
+			'No path-mappable Immich roots are available yet. Check the server settings or add a custom mapping.', 'info')
 		return nil
 	end
 
+	local colLibW = 210
+	local colImmichW = 220
+	local colLocalW = 250
+	local btnChooseW = 85
+	local btnClearW = 65
+	local dialogW = 920
+
 	local viewRows = {
+		spacing = f:control_spacing(),
 		f:row {
-			f:static_text { title = 'Library', width_in_chars = 18, font = '<system/bold>' },
-			f:static_text { title = 'Immich import path', width_in_chars = 38, font = '<system/bold>' },
-			f:static_text { title = 'Selected local folder', width_in_chars = 38, font = '<system/bold>' },
+			spacing = 8,
+			f:static_text { title = 'Library', width = colLibW, font = '<system/bold>' },
+			f:static_text { title = 'Immich path prefix', width = colImmichW, font = '<system/bold>' },
+			f:static_text { title = 'Selected local folder', width = colLocalW, font = '<system/bold>' },
+			f:static_text { title = 'Actions', width = btnChooseW + btnClearW + 8, font = '<system/bold>' },
 		},
 	}
 	for _, r in ipairs(rows) do
@@ -72,66 +85,81 @@ local function presentLibraryMappingDialog(context, f, libraries, currentMapping
 			props[r.displayKey] = '(not selected)'
 		end
 		table.insert(viewRows, f:row {
-			f:static_text { title = r.name or '?', width_in_chars = 18 },
+			spacing = 8,
+			f:static_text { title = r.name or '?', width = colLibW, height_in_lines = 2 },
 			f:static_text {
 				title = r.importPath or '(no import path reported)',
-				width_in_chars = 38,
+				width = colImmichW,
+				truncation = 'middle',
 			},
 			f:static_text {
 				title = LrView.bind { key = r.displayKey, bind_to_object = props },
-				width_in_chars = 32,
+				width = colLocalW,
 				height_in_lines = 2,
 				truncation = 'middle',
 			},
 			f:push_button {
 				title = 'Choose…',
+				width = btnChooseW,
 				enabled = r.importPath ~= nil,
 				action = chooseFn,
 			},
 			f:push_button {
 				title = 'Clear',
+				width = btnClearW,
 				enabled = r.importPath ~= nil,
 				action = clearFn,
 			},
 		})
 	end
 
-	local infoRows = {
+	local infoColumn = {
+		spacing = f:control_spacing(),
 		f:static_text {
-			title = ('Found %d external librar%s. Also showing common Immich uploaded-assets roots and any saved mappings. ' ..
+			title = ('Found %d external librar%s. Also showing the default Immich data folder roots and any saved mappings. ' ..
 				'Choose the local folder Lightroom sees for each Immich path.'):format(
 				model.libraryCount, model.libraryCount == 1 and 'y' or 'ies'),
-			width_in_chars = 100,
-			height_in_lines = 3,
+			width = dialogW,
+			height_in_lines = 2,
 		},
 		f:static_text {
-			title = 'Tip: one /data/library/ mapping usually covers all uploaded user libraries and storage labels. Add per-user rows only as longer-prefix overrides when users are stored on different host paths.',
-			width_in_chars = 100,
+			title = 'Tip: mapping /data/ to your mounted Immich data folder automatically covers all uploaded assets (both /data/library/ and /data/upload/). Use "Add custom mapping…" for per-user overrides or custom mounts.',
+			width = dialogW,
 			height_in_lines = 2,
 		},
 	}
 	if model.librariesWithoutImportPaths > 0 then
-		table.insert(infoRows, f:static_text {
-			title = ('Immich reported %d librar%s without import paths; those cannot be mapped until Immich exposes their paths.'):format(
+		table.insert(infoColumn, f:static_text {
+			title = ('Immich reported %d librar%s without import paths; those cannot be mapped automatically until Immich exposes their paths.'):format(
 				model.librariesWithoutImportPaths,
 				model.librariesWithoutImportPaths == 1 and 'y' or 'ies'),
-			width_in_chars = 100,
+			width = dialogW,
 			height_in_lines = 2,
 		})
 	end
 	if dialogNotice and dialogNotice ~= '' then
-		table.insert(infoRows, f:static_text {
+		table.insert(infoColumn, f:static_text {
 			title = dialogNotice,
-			width_in_chars = 100,
+			width = dialogW,
 			height_in_lines = 3,
 		})
 	end
 
+	-- Nest infoColumn and scrolled_view as distinct children so Lua never
+	-- truncates multiple unpack() calls inside one table constructor.
+	local scrollHeight = math.min(math.max(#rows * 44 + 44, 180), 420)
 	local contents = f:column {
 		spacing = f:control_spacing(),
 		bind_to_object = props,
-		unpack(infoRows),
-		unpack(viewRows),
+		f:column(infoColumn),
+		f:separator { fill_horizontal = 1 },
+		f:scrolled_view {
+			width = dialogW,
+			height = scrollHeight,
+			horizontal_scroller = true,
+			vertical_scroller = true,
+			f:column(viewRows),
+		},
 	}
 
 	local ok = LrDialogs.presentModalDialog{
@@ -141,6 +169,76 @@ local function presentLibraryMappingDialog(context, f, libraries, currentMapping
 	}
 	if ok ~= 'ok' then return nil end
 	return PathMappingChoices.rowsToMappings(rows, function(row) return props[row.key] end)
+end
+
+-- Modal dialog for adding (or overriding) a custom Immich prefix -> local folder mapping.
+local function presentCustomMappingDialog(context, f)
+	local props = LrBinding.makePropertyTable(context)
+	props.label = ''
+	props.immich = ''
+	props.local_ = ''
+
+	local contents = f:column {
+		spacing = f:control_spacing(),
+		bind_to_object = props,
+		f:static_text {
+			title = 'Add a custom Immich storage path prefix (for example a per-user override like /data/library/alice/ or a custom container mount). Longest matching prefix wins.',
+			width_in_chars = 76,
+			height_in_lines = 3,
+		},
+		f:row {
+			f:static_text { title = 'Label', width = 120 },
+			f:edit_field {
+				value = LrView.bind 'label',
+				width_in_chars = 44,
+				immediate = true,
+				placeholder_string = 'e.g. Alice SSD override',
+			},
+		},
+		f:row {
+			f:static_text { title = 'Immich prefix', width = 120 },
+			f:edit_field {
+				value = LrView.bind 'immich',
+				width_in_chars = 44,
+				immediate = true,
+				placeholder_string = '/data/library/alice/',
+			},
+		},
+		f:row {
+			f:static_text { title = 'Local folder', width = 120 },
+			f:edit_field {
+				value = LrView.bind 'local_',
+				width_in_chars = 36,
+				immediate = true,
+				placeholder_string = '/Volumes/photos/alice/',
+			},
+			f:push_button {
+				title = 'Choose…',
+				action = function()
+					local result = LrDialogs.runOpenPanel{
+						title = 'Choose local folder for custom Immich prefix',
+						canChooseFiles = false,
+						canChooseDirectories = true,
+						canCreateDirectories = true,
+						allowsMultipleSelection = false,
+					}
+					if result and result[1] then props.local_ = result[1] end
+				end,
+			},
+		},
+	}
+
+	local ok = LrDialogs.presentModalDialog{
+		title = 'Add custom path mapping',
+		contents = contents,
+		actionVerb = 'Add mapping',
+	}
+	if ok ~= 'ok' then return nil end
+	return {
+		label = props.label,
+		immich = props.immich,
+		local_ = props.local_,
+	}
 end
 
 function M.sectionsForTopOfDialog(f, propertyTable)
@@ -156,7 +254,13 @@ function M.sectionsForTopOfDialog(f, propertyTable)
 	propertyTable:addObserver('apiKey',    function() Settings.setApiKey(propertyTable.apiKey) end)
 	propertyTable:addObserver('logEnabled', function()
 		Settings.setLogEnabled(propertyTable.logEnabled)
-		if propertyTable.logEnabled then Logger.enable() else Logger.disable() end
+		if propertyTable.logEnabled then
+			Logger.enable()
+			Logger.info('Debug logging enabled')
+		else
+			Logger.info('Debug logging disabled')
+			Logger.disable()
+		end
 	end)
 
 	local bind = LrView.bind
@@ -164,21 +268,28 @@ function M.sectionsForTopOfDialog(f, propertyTable)
 	local function testConnection()
 		LrFunctionContext.postAsyncTaskWithContext('ImmichSyncTestConnection', function()
 			propertyTable.connectionStatus = 'Testing…'
+			Logger.info('Testing connection to Immich server')
 			local api = ImmichAPI.new{
 				serverUrl = propertyTable.serverUrl,
 				apiKey = propertyTable.apiKey,
+				logger = Logger,
 			}
 			local _, err = api:ping()
 			if err then
-				propertyTable.connectionStatus = 'FAILED: ' .. Errors.format(err)
+				local msg = 'FAILED: ' .. Errors.format(err)
+				Logger.error('Connection test ping failed: ' .. msg)
+				propertyTable.connectionStatus = msg
 				return
 			end
 			local me, err2 = api:getMe()
 			if err2 then
-				propertyTable.connectionStatus = 'Ping OK but auth failed: ' .. Errors.format(err2)
+				local msg = 'Ping OK but auth failed: ' .. Errors.format(err2)
+				Logger.error('Connection test auth failed: ' .. msg)
+				propertyTable.connectionStatus = msg
 			else
-				propertyTable.connectionStatus = ('OK — signed in as %s'):format(
-					(me and (me.email or me.name)) or 'unknown')
+				local who = (me and (me.email or me.name)) or 'unknown'
+				Logger.info('Connection test succeeded as ' .. tostring(who))
+				propertyTable.connectionStatus = ('OK — signed in as %s'):format(who)
 			end
 		end)
 	end
@@ -189,18 +300,22 @@ function M.sectionsForTopOfDialog(f, propertyTable)
 			local libs = {}
 			local dialogNotice = nil
 
-			if propertyTable.serverUrl and propertyTable.serverUrl ~= ''
-				and propertyTable.apiKey and propertyTable.apiKey ~= '' then
+			local url = Settings.getServerUrl()
+			local key = Settings.getApiKey()
+			if url ~= '' and key ~= '' then
 				local api = ImmichAPI.new{
-					serverUrl = propertyTable.serverUrl,
-					apiKey = propertyTable.apiKey,
+					serverUrl = url,
+					apiKey = key,
+					logger = Logger,
 				}
 				local fetched, err = api:listLibraries()
 				if err then
-					dialogNotice = 'Could not refresh external libraries from Immich Collection Sync (' .. Errors.format(err) .. '). ' ..
+					Logger.warn('Failed to refresh Immich libraries: ' .. Errors.format(err))
+					dialogNotice = 'Could not refresh external libraries from Immich (' .. Errors.format(err) .. '). ' ..
 						'The dialog still shows built-in uploaded-library roots and your already-saved mappings.'
 				else
 					libs = fetched or {}
+					Logger.info(('Fetched %d external Immich libraries'):format(#libs))
 				end
 			else
 				dialogNotice = 'Set the Immich server URL and API key to refresh external libraries automatically. ' ..
@@ -211,9 +326,46 @@ function M.sectionsForTopOfDialog(f, propertyTable)
 			if resolved == nil then return end
 			Settings.setPathMappings(resolved)
 			updateMappingSummary(propertyTable, resolved)
+			Logger.info(('Saved %d path mappings'):format(#resolved))
 			LrDialogs.message('Path mappings updated',
 				PathMappingChoices.summarizeMappings(resolved), 'info')
 		end)
+	end
+
+	local function addCustomMapping()
+		LrFunctionContext.postAsyncTaskWithContext('ImmichSyncAddCustomMapping', function(context)
+			local entry = presentCustomMappingDialog(context, f)
+			if entry == nil then return end
+			local updated, err = PathMappingChoices.upsertMapping(Settings.getPathMappings(), entry)
+			if not updated then
+				LrDialogs.message('Invalid path mapping', err, 'warning')
+				return
+			end
+			Settings.setPathMappings(updated)
+			updateMappingSummary(propertyTable, updated)
+			Logger.info(('Added custom path mapping %s -> %s'):format(entry.immich or '', entry.local_ or ''))
+			LrDialogs.message('Path mappings updated',
+				PathMappingChoices.summarizeMappings(updated), 'info')
+		end)
+	end
+
+	local function showLogFile()
+		local logPath = Logger.logFilePath()
+		if LrFileUtils.exists(logPath) then
+			LrShell.revealInShell(logPath)
+			return
+		end
+		local parentDir = LrPathUtils.parent(logPath)
+		if parentDir and LrFileUtils.exists(parentDir) then
+			LrDialogs.message('Log file not created yet',
+				'No ImmichSync.log file exists yet. Enable debug logging and run an action first.\n\nExpected path:\n' .. logPath,
+				'info')
+			LrShell.revealInShell(parentDir)
+		else
+			LrDialogs.message('Log file not created yet',
+				'No ImmichSync.log file exists yet. Enable debug logging and run an action first.\n\nExpected path:\n' .. logPath,
+				'info')
+		end
 	end
 
 	return {
@@ -231,6 +383,15 @@ function M.sectionsForTopOfDialog(f, propertyTable)
 				f:password_field { value = bind 'apiKey', width_in_chars = 40, immediate = true },
 			},
 			f:row {
+				f:static_text { title = '', width = 120 },
+				f:static_text {
+					title = 'Note: Lightroom SDK 3.0 stores plugin preferences (including the API key) in plaintext. Use a scoped Immich API key.',
+					width_in_chars = 68,
+					height_in_lines = 2,
+					font = '<system/small>',
+				},
+			},
+			f:row {
 				f:push_button { title = 'Test connection', action = testConnection },
 				f:static_text { title = bind 'connectionStatus', width_in_chars = 50,
 					fill_horizontal = 1 },
@@ -243,8 +404,7 @@ function M.sectionsForTopOfDialog(f, propertyTable)
 			f:row {
 				f:static_text {
 					title = 'Translate Immich storage paths to the folders Lightroom sees.\n' ..
-						'Choose folders in the dialog below; the Plugin Manager shows a read-only summary of the saved mappings.\n' ..
-						'No files are downloaded — Lightroom and Immich must reference the same physical files.',
+						'Normal sync matches existing files on disk without transferring data; during Immich → Lightroom sync you can optionally confirm a download fallback for unmapped assets.',
 					height_in_lines = 3,
 					fill_horizontal = 1,
 				},
@@ -254,9 +414,9 @@ function M.sectionsForTopOfDialog(f, propertyTable)
 					title = 'Choose path mappings…',
 					action = choosePathMappings,
 				},
-				f:static_text {
-					title = 'Refreshes Immich libraries when possible and lets you choose local folders in a browse-only dialog.',
-					fill_horizontal = 1,
+				f:push_button {
+					title = 'Add custom mapping…',
+					action = addCustomMapping,
 				},
 			},
 			f:row {
@@ -276,7 +436,7 @@ function M.sectionsForTopOfDialog(f, propertyTable)
 				f:checkbox { value = bind 'logEnabled', title = 'Enable debug logging' },
 				f:push_button {
 					title = 'Show log file',
-					action = function() LrShell.revealInShell(Logger.logFilePath()) end,
+					action = showLogFile,
 				},
 			},
 		},

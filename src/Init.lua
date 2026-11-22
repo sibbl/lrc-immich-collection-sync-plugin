@@ -1,8 +1,9 @@
 --[[
   Init.lua — runs once when the plugin is (re)loaded.
 
-  We intentionally keep this minimal: no global state, no side-effects beyond
-  bootstrapping the logger. Settings are read lazily from LrPrefs where needed.
+  Keep this script 100% self-contained with NO `require` calls: Lightroom's
+  `LrInitPlugin` hook runs very early during plugin bootstrap and can fail
+  with "Could not load toolkit script" when invoking `require`.
 ]]
 
 local LrLogger = import 'LrLogger'

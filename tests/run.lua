@@ -11,6 +11,35 @@ local passed, failed = 0, 0
 local failures = {}
 local currentSuite
 
+local function formatValue(v, depth)
+	depth = depth or 0
+	if type(v) ~= 'table' then
+		if type(v) == 'string' then return string.format('%q', v) end
+		return tostring(v)
+	end
+	if depth > 4 then return '{...}' end
+	local parts = {}
+	local isArray = (#v > 0)
+	if isArray then
+		local count = 0
+		for _ in pairs(v) do count = count + 1 end
+		if count ~= #v then isArray = false end
+	end
+	if isArray then
+		for i = 1, #v do
+			table.insert(parts, formatValue(v[i], depth + 1))
+		end
+	else
+		local keys = {}
+		for k in pairs(v) do table.insert(keys, k) end
+		table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+		for _, k in ipairs(keys) do
+			table.insert(parts, tostring(k) .. ' = ' .. formatValue(v[k], depth + 1))
+		end
+	end
+	return '{ ' .. table.concat(parts, ', ') .. ' }'
+end
+
 function _G.describe(name, fn)
 	currentSuite = name
 	fn()
@@ -55,9 +84,8 @@ function _G.assertDeepEq(a, b, msg)
 		return true
 	end
 	if not eq(a, b) then
-		local inspect = require 'vendor.inspect'
 		error((msg or 'tables differ') ..
-			('\n  expected: %s\n  actual:   %s'):format(inspect(b), inspect(a)), 2)
+			('\n  expected: %s\n  actual:   %s'):format(formatValue(b), formatValue(a)), 2)
 	end
 end
 

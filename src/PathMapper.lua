@@ -30,14 +30,20 @@ function M.new(mappings)
 			})
 		end
 	end
-	-- Pre-sort descending by immich prefix length so the first match wins in
-	-- iteration.
-	table.sort(self.mappings, function(a, b) return #a.immich > #b.immich end)
+	-- Pre-sort descending by immich prefix length (with lexicographical
+	-- tie-breaker) so the first match wins deterministically.
+	table.sort(self.mappings, function(a, b)
+		if #a.immich ~= #b.immich then return #a.immich > #b.immich end
+		return a.immich < b.immich
+	end)
 	self._localSorted = {}
 	for _, m in ipairs(self.mappings) do
 		table.insert(self._localSorted, m)
 	end
-	table.sort(self._localSorted, function(a, b) return #a.local_ > #b.local_ end)
+	table.sort(self._localSorted, function(a, b)
+		if #a.local_ ~= #b.local_ then return #a.local_ > #b.local_ end
+		return a.local_ < b.local_
+	end)
 	return self
 end
 

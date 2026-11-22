@@ -13,8 +13,9 @@ LrDialogs.message(
 		.. 'Use File > Plug-in Manager… > Immich Collection Sync to configure:\n'
 		.. '• Immich server URL\n'
 		.. '• API key\n'
-		.. '• Path mappings (including fetched Immich libraries)\n\n'
-		.. 'This plugin never downloads photos. Lightroom and Immich are '
-		.. 'expected to reference the same physical files on disk.',
+		.. '• Path mappings (including fetched Immich libraries and custom prefixes)\n\n'
+		.. 'Normal sync references the same physical files on disk; an optional '
+		.. 'download fallback is offered during Immich → Lightroom sync for '
+		.. 'unmapped assets.',
 	'info'
 )

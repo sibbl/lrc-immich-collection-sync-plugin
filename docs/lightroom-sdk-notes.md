@@ -29,7 +29,7 @@ official documentation is silent.
 | `LrSdkVersion` / `LrSdkMinimumVersion` | We target `3.0`. |
 | `LrToolkitIdentifier` | Unique reverse-DNS-ish string. Ours: `de.sibbl.lrc-immich-collection-sync-plugin`. |
 | `LrPluginName` | User-visible name. |
-| `LrInitPlugin` | Path to an init script, runs on load. |
+| `LrInitPlugin` | Path to an init script, runs on load. Keep it self-contained with **no `require` calls** (use `import` directly) — Lightroom's init hook can fail with `Could not load toolkit script` if it relies on `require`. |
 | `LrPluginInfoProvider` | Path to a module returning a table with `sectionsForTopOfDialog` / `sectionsForBottomOfDialog`. |
 | `LrLibraryMenuItems` | **Array** of `{ title, file }` entries added under `Library > Plug-in Extras`. ⚠️ Declaring this key twice at top level causes the first declaration to be silently dropped — the old plugin hit this (see `immich-plugin.lrplugin/Info.lua` lines 27 and 48). |
 | `LrPluginInfoURL` | Shown on the Plugin Manager detail pane. |

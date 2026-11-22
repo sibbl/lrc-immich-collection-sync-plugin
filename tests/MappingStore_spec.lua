@@ -18,6 +18,32 @@ describe('MappingStore', function()
 		assertEq(s:get('7').albumId, 'a')
 	end)
 
+	it('isolates collection IDs across different catalogs with legacy fallback', function()
+		local backend = {}
+		local legacy = MappingStore.new(backend)
+		legacy:set(10, { albumId = 'legacy-album' })
+
+		local catA = MappingStore.new(backend, { catalogId = '/catalogs/A.lrcat' })
+		local catB = MappingStore.new(backend, { catalogId = '/catalogs/B.lrcat' })
+
+		-- Legacy unscoped entry is still visible until overwritten.
+		assertEq(catA:get(10).albumId, 'legacy-album')
+
+		catA:set(10, { albumId = 'album-A' })
+		catB:set(10, { albumId = 'album-B' })
+		assertEq(catA:get(10).albumId, 'album-A')
+		assertEq(catB:get(10).albumId, 'album-B')
+	end)
+
+	it('tracks downloaded assets per catalog', function()
+		local backend = {}
+		local catA = MappingStore.new(backend, { catalogId = '/A.lrcat' })
+		local catB = MappingStore.new(backend, { catalogId = '/B.lrcat' })
+		catA:setDownloadedAsset('asset-1', '/downloads/img1.jpg')
+		assertEq(catA:getDownloadedAssets()['asset-1'], '/downloads/img1.jpg')
+		assertNil(catB:getDownloadedAssets()['asset-1'])
+	end)
+
 	it('remove deletes the entry', function()
 		local s = MappingStore.new({})
 		s:set(1, { albumId = 'a' })

@@ -5,8 +5,9 @@
     serverUrl            string
     apiKey               string
     pathMappings         string (JSON array of {immich, local_, label})
-	downloadFolder       string (last folder chosen for download+import fallback)
-    collectionMappings   string (JSON object: collectionLocalId -> {albumId, albumName, serverUrl, linkedAt})
+    downloadFolder       string (last folder chosen for download+import fallback)
+    collectionMappings   string (owned by MappingStore)
+    downloadedAssets     string (owned by MappingStore)
     logEnabled           boolean
 
   All non-scalar values are stored as JSON strings because LrPrefs is not a
@@ -22,6 +23,11 @@ local function prefs()
 	return LrPrefs.prefsForPlugin()
 end
 
+local function trim(v)
+	if v == nil then return '' end
+	return (tostring(v):gsub('^%s+', ''):gsub('%s+$', ''))
+end
+
 local function readJson(key, default)
 	local raw = prefs()[key]
 	if raw == nil or raw == '' then return default end
@@ -34,17 +40,17 @@ local function writeJson(key, value)
 	prefs()[key] = JSON:encode(value)
 end
 
-function M.getServerUrl() return prefs().serverUrl or '' end
-function M.setServerUrl(v) prefs().serverUrl = v or '' end
+function M.getServerUrl() return trim(prefs().serverUrl) end
+function M.setServerUrl(v) prefs().serverUrl = trim(v) end
 
-function M.getApiKey() return prefs().apiKey or '' end
-function M.setApiKey(v) prefs().apiKey = v or '' end
+function M.getApiKey() return trim(prefs().apiKey) end
+function M.setApiKey(v) prefs().apiKey = trim(v) end
 
 function M.getLogEnabled() return prefs().logEnabled and true or false end
 function M.setLogEnabled(v) prefs().logEnabled = v and true or false end
 
-function M.getDownloadFolder() return prefs().downloadFolder or '' end
-function M.setDownloadFolder(v) prefs().downloadFolder = v or '' end
+function M.getDownloadFolder() return trim(prefs().downloadFolder) end
+function M.setDownloadFolder(v) prefs().downloadFolder = trim(v) end
 
 -- Path mappings -------------------------------------------------------------
 -- Returns an array of { immich, local_, label } tables.
@@ -54,30 +60,6 @@ end
 
 function M.setPathMappings(list)
 	writeJson('pathMappings', list or {})
-end
-
--- Collection mappings ------------------------------------------------------
--- Returns a table keyed by collection localIdentifier (number) serialized as
--- string. Stored-as-JSON keeps keys as strings so we normalize on read/write.
-function M.getCollectionMappings()
-	return readJson('collectionMappings', {})
-end
-
-function M.setCollectionMapping(collectionLocalId, info)
-	local all = M.getCollectionMappings()
-	all[tostring(collectionLocalId)] = info
-	writeJson('collectionMappings', all)
-end
-
-function M.removeCollectionMapping(collectionLocalId)
-	local all = M.getCollectionMappings()
-	all[tostring(collectionLocalId)] = nil
-	writeJson('collectionMappings', all)
-end
-
-function M.getCollectionMapping(collectionLocalId)
-	local all = M.getCollectionMappings()
-	return all[tostring(collectionLocalId)]
 end
 
 return M

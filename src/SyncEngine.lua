@@ -5,29 +5,37 @@
     - A "link" pairs a Lightroom collection C with an Immich album A.
     - For each run the user picks a direction D:
         'lr_to_immich'  : Immich gets aligned to Lightroom.
-        'immich_to_lr'  : Lightroom gets aligned to Immich Collection Sync.
+        'immich_to_lr'  : Lightroom gets aligned to Immich.
     - We never silently drop items; unresolvable ones surface as warnings.
 
   computeDiff parameters (all required unless noted):
-    direction        'lr_to_immich' | 'immich_to_lr'
-    collectionPhotos array of LrPhoto-like objects (the collection's members)
-    albumAssets      array of { id, originalPath } from Immich Collection Sync
-    pathMapper       PathMapper instance
-    catalogIndex     CatalogIndex instance
+    direction          'lr_to_immich' | 'immich_to_lr'
+    collectionPhotos   array of LrPhoto-like objects (the collection's members)
+    albumAssets        array of { id, originalPath } from Immich
+    pathMapper         PathMapper instance
+    catalogIndex       CatalogIndex instance
+    fileExists         optional function(path)->boolean
+    downloadedPaths    optional map[assetId]->localPath for previously downloaded
+                       unmapped assets (avoids re-downloading duplicates)
+    resolveRemoteAsset optional function(immichPath)->asset,err used in
+                       lr_to_immich to find Immich assets not yet in the album
+    progress           optional { setCaption=f, setPortionComplete=f, isCanceled=f }
 
-  Returns a table:
+  Returns a table (or nil, 'canceled' if canceled via progress):
     {
       direction,
-      toAddRemote   = { assetId… },            -- add to Immich Collection Sync album
-      toRemoveRemote= { assetId… },            -- remove from Immich Collection Sync album
-      toAddLocal    = { LrPhoto… },            -- add to LR collection
-			toImportLocal = { {assetId, localPath} … }, -- import file, then add to LR collection
-			toDownloadLocal = { {assetId, fileName, originalPath} … }, -- download, import, add
-      toRemoveLocal = { LrPhoto… },            -- remove from LR collection
+      toAddRemote     = { assetId… },              -- add to Immich album
+      toRemoveRemote  = { assetId… },              -- remove from Immich album
+      toAddLocal      = { LrPhoto… },              -- add to LR collection
+      toImportLocal   = { {assetId, localPath}… }, -- import file, then add to LR collection
+      toDownloadLocal = { {assetId, fileName, originalPath}… }, -- download, import, add
+      toRemoveLocal   = { LrPhoto… },              -- remove from LR collection
       warnings = {
-        unmappableImmich = { {assetId, path, reason} … },
-				missingLocal     = { {assetId, localPath} … },     -- mapped but inaccessible / unsafe
-        unmappableLocal  = { {photoPath, reason} … },      -- LR photo outside any mapping
+        unmappableImmich = { {assetId, path, reason}… },
+        missingLocal     = { {assetId, localPath, reason}… },
+        missingRemote    = { {photoPath, immichPath, reason}… },
+        unmappableLocal  = { {photoPath, reason}… },
+        duplicateLocal   = { {assetId, localPath, reason}… },
       },
       summary  = { addCount, removeCount, warningCount }
     }
@@ -36,6 +44,9 @@
   chosen direction. The other is set to empty tables for convenience.
 ]]
 
+local Paths = require 'Paths'
+local Errors = require 'Errors'
+
 local M = {}
 
 local function newSet()  return {} end
@@ -43,7 +54,7 @@ local function setAdd(s, v) s[v] = true end
 local function setHas(s, v) return s[v] == true end
 
 local function makeError(code, message, details)
-	return { code = code, message = message, details = details }
+	return Errors.make(code, message, details)
 end
 
 local function fileExists(opts, path)
@@ -69,39 +80,70 @@ function M.computeDiff(opts)
 
 	local pathMapper = opts.pathMapper
 	local catalogIndex = opts.catalogIndex
+	local downloadedPaths = opts.downloadedPaths or {}
+	local progress = opts.progress
 
 	local warnings = {
 		unmappableImmich = {},
 		missingLocal = {},
+		missingRemote = {},
 		unmappableLocal = {},
+		duplicateLocal = {},
 	}
 
 	-- Resolve Immich album assets → catalog photos keyed by assetId.
-	--   remoteAssetIdSet = set of assetIds that have a resolvable LrPhoto.
-	--   remoteAssetIdToPhoto = assetId -> LrPhoto.
+	--   remoteAssetIdSet         = set of assetIds that have a resolvable LrPhoto.
+	--   remoteAssetIdToPhoto     = assetId -> LrPhoto.
 	--   remoteAssetIdToLocalPath = assetId -> local path for importable files
-	--     that are not in the Lightroom catalog yet.
+	--                              that are not in the Lightroom catalog yet.
+	--   albumAssetsByLocalKey    = normalized local path -> asset (used to match
+	--                              collection photos back to album assets).
 	local remoteAssetIdSet = newSet()
 	local remoteAssetIdToPhoto = {}
 	local remoteAssetIdToLocalPath = {}
+	local albumAssetsByLocalKey = {}
+
 	for _, asset in ipairs(opts.albumAssets or {}) do
 		local localPath, reason = pathMapper:immichToLocal(asset.originalPath)
+		local usedDownloaded = false
+		if not localPath and asset.id and downloadedPaths[asset.id] then
+			local trackedPath = downloadedPaths[asset.id]
+			local trackedPhoto = catalogIndex:lookup(trackedPath)
+			if trackedPhoto or fileExists(opts, trackedPath) then
+				localPath = trackedPath
+				usedDownloaded = true
+			end
+		end
+
 		if not localPath then
 			table.insert(warnings.unmappableImmich, {
 				assetId = asset.id, path = asset.originalPath, reason = reason,
 			})
 		else
-			local photo = catalogIndex:lookup(localPath)
+			albumAssetsByLocalKey[Paths.normalizeKey(localPath)] = asset
+			local photo, isDuplicate = catalogIndex:lookup(localPath)
+			if isDuplicate then
+				table.insert(warnings.duplicateLocal, {
+					assetId = asset.id,
+					localPath = localPath,
+					reason = 'multiple Lightroom catalog entries share this path',
+				})
+			end
 			if not photo then
 				if opts.direction == 'immich_to_lr' and fileExists(opts, localPath) then
 					remoteAssetIdToLocalPath[asset.id] = localPath
-				else
+				elseif not usedDownloaded then
 					table.insert(warnings.missingLocal, {
 						assetId = asset.id,
+						immichPath = asset.originalPath,
 						localPath = localPath,
 						reason = opts.direction == 'immich_to_lr'
 							and 'mapped file is not accessible locally'
 							or 'asset is not in the Lightroom catalog',
+					})
+				else
+					table.insert(warnings.unmappableImmich, {
+						assetId = asset.id, path = asset.originalPath, reason = reason,
 					})
 				end
 			else
@@ -111,37 +153,28 @@ function M.computeDiff(opts)
 		end
 	end
 
-	-- Resolve Lightroom collection photos → Immich assetIds via the album we
-	-- just indexed. We only accept a match if the LR photo's path maps into
-	-- a known mapping AND the resulting Immich path appears in the album's
-	-- asset list. Photos whose path is outside any mapping get a warning.
-	local albumAssetsByLocalPath = {}
-	for _, asset in ipairs(opts.albumAssets or {}) do
-		local localPath = pathMapper:immichToLocal(asset.originalPath)
-		if localPath then
-			local Paths = require 'Paths'
-			albumAssetsByLocalPath[Paths.foldForCompare(localPath)] = asset
-		end
-	end
-
-	local Paths = require 'Paths'
+	-- Resolve Lightroom collection photos → Immich album assets.
+	-- Uses Paths.normalizeKey so Windows backslashes match forward-slash
+	-- PathMapper outputs consistently.
 	local localAssetIdSet = newSet()
-	local localAssetIdToPhoto = {}
-	local collectionPhotosOutsideAlbum = {}   -- path-mapped LR photos not in album
+	local collectionPhotosOutsideAlbum = {}
 	for _, photo in ipairs(opts.collectionPhotos or {}) do
 		local photoPath = photo:getRawMetadata('path')
-		local immichPath, reason = pathMapper:localToImmich(photoPath)
-		if not immichPath then
-			table.insert(warnings.unmappableLocal, {
-				photoPath = photoPath, reason = reason,
-			})
+		local match = photoPath and albumAssetsByLocalKey[Paths.normalizeKey(photoPath)] or nil
+		if match then
+			setAdd(localAssetIdSet, match.id)
 		else
-			local match = albumAssetsByLocalPath[Paths.foldForCompare(photoPath)]
-			if match then
-				setAdd(localAssetIdSet, match.id)
-				localAssetIdToPhoto[match.id] = photo
+			local immichPath, reason = pathMapper:localToImmich(photoPath)
+			if not immichPath then
+				table.insert(warnings.unmappableLocal, {
+					photoPath = photoPath, reason = reason,
+				})
 			else
-				table.insert(collectionPhotosOutsideAlbum, photo)
+				table.insert(collectionPhotosOutsideAlbum, {
+					photo = photo,
+					photoPath = photoPath,
+					immichPath = immichPath,
+				})
 			end
 		end
 	end
@@ -153,18 +186,63 @@ function M.computeDiff(opts)
 	local toRemoveLocal = {}
 
 	if opts.direction == 'lr_to_immich' then
-		-- Add every LR photo to Immich Collection Sync whose mapped-to Immich Collection Sync asset is NOT in
-		-- the album. That requires that the LR photo's file ALREADY exists as
-		-- an Immich asset; we only have such IDs via the album query, so
-		-- photos outside the album with no prior Immich record cannot be
-		-- added by a membership sync — surface them as warnings instead.
-		for _, photo in ipairs(collectionPhotosOutsideAlbum) do
-			table.insert(warnings.missingLocal, {
-				photoPath = photo:getRawMetadata('path'),
-				reason = 'photo in LR collection has no matching Immich asset; upload to Immich Collection Sync first',
-			})
+		-- Resolve LR collection photos that are not yet in the Immich album by
+		-- querying Immich for their mapped originalPath (when a resolver is
+		-- provided). Assets found on Immich are queued into toAddRemote; ones
+		-- not found surface as missingRemote warnings.
+		local toAddRemoteSet = newSet()
+		local totalLookup = #collectionPhotosOutsideAlbum
+		for i, entry in ipairs(collectionPhotosOutsideAlbum) do
+			if progress then
+				if progress.isCanceled and progress.isCanceled() then
+					return nil, 'canceled'
+				end
+				if progress.setPortionComplete and totalLookup > 0 then
+					progress.setPortionComplete(i - 1, totalLookup)
+				end
+				if progress.setCaption then
+					progress.setCaption(('Looking up Immich assets (%d/%d)…'):format(i, totalLookup))
+				end
+			end
+
+			if opts.resolveRemoteAsset then
+				local resolvedAsset, resolveErr = opts.resolveRemoteAsset(entry.immichPath)
+				if resolveErr then
+					table.insert(warnings.missingRemote, {
+						photoPath = entry.photoPath,
+						immichPath = entry.immichPath,
+						reason = 'Immich lookup failed: ' .. Errors.format(resolveErr),
+					})
+				elseif resolvedAsset and resolvedAsset.id then
+					if not setHas(remoteAssetIdSet, resolvedAsset.id) then
+						setAdd(toAddRemoteSet, resolvedAsset.id)
+					end
+				else
+					table.insert(warnings.missingRemote, {
+						photoPath = entry.photoPath,
+						immichPath = entry.immichPath,
+						reason = 'photo in LR collection has no matching Immich asset; upload to Immich first',
+					})
+				end
+			else
+				table.insert(warnings.missingRemote, {
+					photoPath = entry.photoPath,
+					immichPath = entry.immichPath,
+					reason = 'photo in LR collection has no matching Immich asset; upload to Immich first',
+				})
+			end
+
+			if progress and progress.setPortionComplete and totalLookup > 0 then
+				progress.setPortionComplete(i, totalLookup)
+			end
 		end
-		-- Remove from Immich Collection Sync album every asset whose LrPhoto is NOT in the LR collection.
+
+		for assetId in pairs(toAddRemoteSet) do
+			table.insert(toAddRemote, assetId)
+		end
+		table.sort(toAddRemote)
+
+		-- Remove from Immich album every asset whose LrPhoto is NOT in the LR collection.
 		for _, assetId in ipairs(setDiff(remoteAssetIdSet, localAssetIdSet)) do
 			table.insert(toRemoveRemote, assetId)
 		end
@@ -186,14 +264,19 @@ function M.computeDiff(opts)
 		end
 		-- Remove from LR collection every photo that is not in the album
 		-- (and whose path is mapped; unmappable ones are warnings, not deletions).
-		for _, photo in ipairs(collectionPhotosOutsideAlbum) do
-			table.insert(toRemoveLocal, photo)
+		for _, entry in ipairs(collectionPhotosOutsideAlbum) do
+			table.insert(toRemoveLocal, entry.photo)
 		end
 	end
 
+	local matchedCount = 0
+	for _ in pairs(localAssetIdSet) do matchedCount = matchedCount + 1 end
+
 	local warningCount = #warnings.unmappableImmich
 		+ #warnings.missingLocal
+		+ #warnings.missingRemote
 		+ #warnings.unmappableLocal
+		+ #warnings.duplicateLocal
 
 	return {
 		direction = opts.direction,
@@ -201,14 +284,18 @@ function M.computeDiff(opts)
 		toRemoveRemote = toRemoveRemote,
 		toAddLocal = toAddLocal,
 		toImportLocal = toImportLocal,
+		toDownloadLocal = {},
 		toRemoveLocal = toRemoveLocal,
 		warnings = warnings,
 		summary = {
 			addCount = #toAddRemote + #toAddLocal + #toImportLocal,
 			removeCount = #toRemoveRemote + #toRemoveLocal,
 			warningCount = warningCount,
+			matchedCount = matchedCount,
+			albumAssetCount = #(opts.albumAssets or {}),
+			collectionPhotoCount = #(opts.collectionPhotos or {}),
 		},
-	}
+	}, nil
 end
 
 -- applyDiff runs the requested mutations. This function is not pure: it
@@ -216,16 +303,17 @@ end
 -- can drive it without Lightroom.
 --
 -- deps = {
---   immichApi,        -- ImmichAPI instance
---   albumId,          -- string
---   collection,       -- LR collection with addPhotos/removePhotos
---   importPhotos,     -- optional function(paths)->{LrPhoto…}; required for toImportLocal
---   downloadAsset,    -- optional function(assetId)->bytes,err; required for toDownloadLocal
+--   immichApi,           -- ImmichAPI instance
+--   albumId,             -- string
+--   collection,          -- LR collection with addPhotos/removePhotos
+--   importPhotos,        -- optional function(paths)->{LrPhoto…}, {failures…}
+--   downloadAsset,       -- optional function(assetId)->bytes,err
 --   saveDownloadedAsset, -- optional function(entry,bytes)->localPath,err
---   yieldSafePcall,   -- optional function(func,...)->ok,... ; use LrTasks.pcall in LR runtime
---   fileExists,       -- optional function(path)->boolean
---   withWriteAccess,  -- function(name, fn) wrapping LR mutations
---   progress,         -- optional { setPortionComplete=f, isCanceled=f, setCaption=f }
+--   onAssetDownloaded,   -- optional function(assetId, localPath)
+--   yieldSafePcall,      -- optional function(func,...)->ok,... ; use LrTasks.pcall in LR runtime
+--   fileExists,          -- optional function(path)->boolean
+--   withWriteAccess,     -- function(name, fn) -> status ('executed'|'aborted'|nil)
+--   progress,            -- optional { setPortionComplete=f, isCanceled=f, setCaption=f }
 -- }
 function M.applyDiff(diff, deps)
 	assert(deps.immichApi, 'immichApi required')
@@ -236,6 +324,7 @@ function M.applyDiff(diff, deps)
 	local result = {
 		removedRemote = 0, addedRemote = 0,
 		removedLocal = 0,  addedLocal = 0, importedLocal = 0, downloadedLocal = 0,
+		canceled = false,
 		errors = {},
 	}
 	local progress = deps.progress
@@ -243,27 +332,50 @@ function M.applyDiff(diff, deps)
 
 	local function step(caption)
 		if progress and progress.setCaption then progress.setCaption(caption) end
-		if progress and progress.isCanceled and progress.isCanceled() then return true end
+		if progress and progress.isCanceled and progress.isCanceled() then
+			result.canceled = true
+			return true
+		end
 		return false
 	end
 
 	if #diff.toRemoveRemote > 0 then
-		if step('Removing assets from Immich Collection Sync album…') then return result end
-		local _, err = deps.immichApi:removeAssetsFromAlbum(deps.albumId, diff.toRemoveRemote)
+		if step('Removing assets from Immich album…') then return result end
+		local resp, err = deps.immichApi:removeAssetsFromAlbum(deps.albumId, diff.toRemoveRemote)
 		if err then
 			table.insert(result.errors, { op = 'remote_remove', err = err })
 		else
-			result.removedRemote = #diff.toRemoveRemote
+			result.removedRemote = (type(resp) == 'table' and type(resp.removed) == 'number')
+				and resp.removed or #diff.toRemoveRemote
+			if type(resp) == 'table' and type(resp.failed) == 'table' then
+				for _, f in ipairs(resp.failed) do
+					table.insert(result.errors, {
+						op = 'remote_remove',
+						err = makeError('remote_item_failed',
+							('Failed to remove asset %s: %s'):format(tostring(f.id), tostring(f.error)), f),
+					})
+				end
+			end
 		end
 	end
 
 	if #diff.toAddRemote > 0 then
-		if step('Adding assets to Immich Collection Sync album…') then return result end
-		local _, err = deps.immichApi:addAssetsToAlbum(deps.albumId, diff.toAddRemote)
+		if step('Adding assets to Immich album…') then return result end
+		local resp, err = deps.immichApi:addAssetsToAlbum(deps.albumId, diff.toAddRemote)
 		if err then
 			table.insert(result.errors, { op = 'remote_add', err = err })
 		else
-			result.addedRemote = #diff.toAddRemote
+			result.addedRemote = (type(resp) == 'table' and type(resp.added) == 'number')
+				and resp.added or #diff.toAddRemote
+			if type(resp) == 'table' and type(resp.failed) == 'table' then
+				for _, f in ipairs(resp.failed) do
+					table.insert(result.errors, {
+						op = 'remote_add',
+						err = makeError('remote_item_failed',
+							('Failed to add asset %s: %s'):format(tostring(f.id), tostring(f.error)), f),
+					})
+				end
+			end
 		end
 	end
 
@@ -279,8 +391,20 @@ function M.applyDiff(diff, deps)
 				err = makeError('download_unavailable', 'Download/import functions were not provided'),
 			})
 		else
-			for _, entry in ipairs(toDownloadLocal) do
-				if progress and progress.isCanceled and progress.isCanceled() then return result end
+			local totalDownloads = #toDownloadLocal
+			for i, entry in ipairs(toDownloadLocal) do
+				if progress and progress.isCanceled and progress.isCanceled() then
+					result.canceled = true
+					return result
+				end
+				if progress and progress.setCaption then
+					progress.setCaption(('Downloading %d of %d: %s'):format(
+						i, totalDownloads, tostring(entry.fileName or entry.assetId)))
+				end
+				if progress and progress.setPortionComplete then
+					progress.setPortionComplete(i - 1, totalDownloads)
+				end
+
 				local okDownload, bytes, downloadErr = yieldSafePcall(deps.downloadAsset, entry.assetId)
 				if not okDownload then
 					table.insert(result.errors, {
@@ -293,7 +417,7 @@ function M.applyDiff(diff, deps)
 						err = downloadErr or makeError('download_failed', 'No data returned for asset ' .. tostring(entry.assetId), entry),
 					})
 				else
-					local ok, localPath, saveErr = pcall(deps.saveDownloadedAsset, entry, bytes)
+					local ok, localPath, saveErr = yieldSafePcall(deps.saveDownloadedAsset, entry, bytes)
 					if not ok then
 						table.insert(result.errors, {
 							op = 'local_download',
@@ -306,11 +430,18 @@ function M.applyDiff(diff, deps)
 						})
 					else
 						result.downloadedLocal = result.downloadedLocal + 1
+						if deps.onAssetDownloaded then
+							yieldSafePcall(deps.onAssetDownloaded, entry.assetId, localPath)
+						end
 						table.insert(downloadedImportEntries, {
 							assetId = entry.assetId,
 							localPath = localPath,
 						})
 					end
+				end
+
+				if progress and progress.setPortionComplete then
+					progress.setPortionComplete(i, totalDownloads)
 				end
 			end
 		end
@@ -346,7 +477,7 @@ function M.applyDiff(diff, deps)
 		if step(#pathsToImport > 0 and 'Importing files and updating Lightroom collection…' or 'Updating Lightroom collection…') then
 			return result
 		end
-		deps.withWriteAccess('Immich sync', function()
+		local writeStatus = deps.withWriteAccess('Immich sync', function()
 			local importedPhotos = {}
 			local photosToAdd = {}
 
@@ -357,15 +488,26 @@ function M.applyDiff(diff, deps)
 						err = makeError('import_unavailable', 'Lightroom catalog import function was not provided'),
 					})
 				else
-					local ok, importedOrErr = yieldSafePcall(deps.importPhotos, pathsToImport)
+					local ok, importedOrErr, importFailures = yieldSafePcall(deps.importPhotos, pathsToImport)
 					if not ok then
 						table.insert(result.errors, {
 							op = 'local_import',
 							err = makeError('import_failed', tostring(importedOrErr)),
 						})
-					elseif importedOrErr then
-						for _, photo in ipairs(importedOrErr) do table.insert(importedPhotos, photo) end
-						result.importedLocal = #importedOrErr
+					else
+						if type(importedOrErr) == 'table' then
+							for _, photo in ipairs(importedOrErr) do table.insert(importedPhotos, photo) end
+							result.importedLocal = #importedOrErr
+						end
+						if type(importFailures) == 'table' then
+							for _, fail in ipairs(importFailures) do
+								table.insert(result.errors, {
+									op = 'local_import',
+									err = makeError('import_failed',
+										('Could not import %s: %s'):format(tostring(fail.path), tostring(fail.err)), fail),
+								})
+							end
+						end
 					end
 				end
 			end
@@ -373,14 +515,35 @@ function M.applyDiff(diff, deps)
 			for _, photo in ipairs(importedPhotos) do table.insert(photosToAdd, photo) end
 			for _, photo in ipairs(diff.toAddLocal) do table.insert(photosToAdd, photo) end
 			if #photosToAdd > 0 then
-				deps.collection:addPhotos(photosToAdd)
-				result.addedLocal = #photosToAdd
+				local okAdd, addErr = yieldSafePcall(function() deps.collection:addPhotos(photosToAdd) end)
+				if okAdd then
+					result.addedLocal = #photosToAdd
+				else
+					table.insert(result.errors, {
+						op = 'local_add',
+						err = makeError('collection_add_failed', tostring(addErr)),
+					})
+				end
 			end
 			if #diff.toRemoveLocal > 0 then
-				deps.collection:removePhotos(diff.toRemoveLocal)
-				result.removedLocal = #diff.toRemoveLocal
+				local okRem, remErr = yieldSafePcall(function() deps.collection:removePhotos(diff.toRemoveLocal) end)
+				if okRem then
+					result.removedLocal = #diff.toRemoveLocal
+				else
+					table.insert(result.errors, {
+						op = 'local_remove',
+						err = makeError('collection_remove_failed', tostring(remErr)),
+					})
+				end
 			end
 		end)
+		if writeStatus == 'aborted' or writeStatus == false then
+			table.insert(result.errors, {
+				op = 'local_write',
+				err = makeError('write_access_aborted',
+					'Lightroom could not acquire catalog write access (catalog busy). Please retry.'),
+			})
+		end
 	end
 
 	return result

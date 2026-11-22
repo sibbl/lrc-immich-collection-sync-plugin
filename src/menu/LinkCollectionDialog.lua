@@ -9,17 +9,17 @@
 
 local LrApplication = import 'LrApplication'
 local LrFunctionContext = import 'LrFunctionContext'
-local LrTasks = import 'LrTasks'
 local LrDialogs = import 'LrDialogs'
 local LrView = import 'LrView'
 local LrBinding = import 'LrBinding'
+local LrPrefs = import 'LrPrefs'
 
 local Settings = require 'Settings'
 local MappingStore = require 'MappingStore'
 local ImmichAPI = require 'ImmichAPI'
 local Dialogs = require 'Dialogs'
 local Errors = require 'Errors'
-local LrPrefs = import 'LrPrefs'
+local Logger = require 'Logger'
 
 LrFunctionContext.postAsyncTaskWithContext('ImmichLinkCollection', function(context)
 	if not Dialogs.requireCredentials() then return end
@@ -32,9 +32,11 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichLinkCollection', function(cont
 	local api = ImmichAPI.new{
 		serverUrl = Settings.getServerUrl(),
 		apiKey = Settings.getApiKey(),
+		logger = Logger,
 	}
 	local albums, err = api:listAlbums()
 	if err then
+		Logger.error('Failed to list albums: ' .. Errors.format(err))
 		LrDialogs.message('Immich Collection Sync — could not fetch albums', Errors.format(err), 'critical')
 		return
 	end
@@ -49,14 +51,16 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichLinkCollection', function(cont
 
 	local items = {}
 	for _, a in ipairs(albums) do
+		local suffix = a.shared and ', shared' or ''
 		table.insert(items, {
-			title = ('%s  (%d assets)'):format(a.albumName or '(unnamed)', a.assetCount or 0),
+			title = ('%s  (%d assets%s)'):format(a.albumName or '(unnamed)', a.assetCount or 0, suffix),
 			value = a.id,
 		})
 	end
 
+	local catalog = LrApplication.activeCatalog()
 	local properties = LrBinding.makePropertyTable(context)
-	local store = MappingStore.new(LrPrefs.prefsForPlugin())
+	local store = MappingStore.new(LrPrefs.prefsForPlugin(), { catalogId = Dialogs.catalogId(catalog) })
 	local existing = store:get(collection.localIdentifier)
 	properties.selectedAlbumId = existing and existing.albumId or items[1].value
 
@@ -69,7 +73,7 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichLinkCollection', function(cont
 			font = '<system/bold>',
 		},
 		f:static_text {
-			title = 'Pick an Immich album. The link is stored per-collection and can be changed later.',
+			title = 'Pick an Immich album (includes owned and shared albums). The link is stored per-collection and can be changed later.',
 			width_in_chars = 60,
 			height_in_lines = 2,
 		},
@@ -100,9 +104,13 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichLinkCollection', function(cont
 		serverUrl = Settings.getServerUrl(),
 	})
 
+	Logger.info(('Linked collection "%s" (id=%s) to Immich album "%s" (id=%s)'):format(
+		collection:getName(), tostring(collection.localIdentifier),
+		tostring(chosen.albumName or ''), tostring(chosen.id)))
+
 	LrDialogs.message(
 		'Immich Collection Sync',
-		('Linked "%s" to Immich Collection Sync album "%s".\nUse Library > Plug-in Extras > Immich Collection Sync: Sync… to sync.'):format(
+		('Linked "%s" to Immich album "%s".\nUse Library > Plug-in Extras > Immich Collection Sync: Sync… to sync.'):format(
 			collection:getName(), chosen.albumName or ''),
 		'info')
 end)

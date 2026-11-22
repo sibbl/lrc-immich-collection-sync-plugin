@@ -1,29 +1,40 @@
 --[[
-  ImmichAPI — minimal JSON-only client for the endpoints we actually need.
+  ImmichAPI — minimal client for the Immich REST endpoints we need.
 
   Design goals:
-    * Zero file transfer. No multipart.
-    * Injectable `http` dependency so it is trivially unit-testable.
-    * Retry with exponential backoff on 429/5xx.
+    * Zero uploads. No multipart.
+    * Injectable `http` transport and `sleep` function so it is unit-testable.
+    * Retry with exponential backoff on network errors, 429, and 5xx.
+    * Batching + per-asset result checking for album membership updates.
 
-  Constructor: ImmichAPI.new{ serverUrl, apiKey, http, sleep, maxRetries }
-      http (optional)       table with post/get/delete returning body, headers
-                            (defaults to a wrapper around LrHttp)
-      sleep (optional)      function(seconds) for backoff (defaults to a noop
-                            for tests; LR wrapper injects LrTasks.sleep)
+  Constructor: ImmichAPI.new{ serverUrl, apiKey, http, sleep, maxRetries, batchSize, logger }
+      http (optional)       table with request(method, url, headers, body, timeout)
+                            returning body, headers (defaults to LrHttp adapter)
+      sleep (optional)      function(seconds) for backoff (defaults to LrTasks.sleep)
       maxRetries (optional) defaults to 3
+      batchSize (optional)  defaults to 250
+      logger (optional)     { info, warn, error, trace }
 ]]
 
 local Errors = require 'Errors'
 local JSON = require 'JSON'
+local Paths = require 'Paths'
 
 local M = {}
 M.__index = M
 
-local function trimSlash(s)
+local function trim(s)
 	if s == nil then return '' end
-	return (s:gsub('/+$', ''))
+	return (tostring(s):gsub('^%s+', ''):gsub('%s+$', ''))
 end
+
+local function trimSlash(s)
+	return (trim(s):gsub('/+$', ''))
+end
+
+local HTTP_TIMEOUT_SECONDS = 30
+local DOWNLOAD_TIMEOUT_SECONDS = 180
+local DEFAULT_BATCH_SIZE = 250
 
 -- Build the default HTTP adapter lazily so requiring this module does not
 -- pull LrHttp during unit tests (where `import` is a mock).
@@ -31,16 +42,15 @@ end
 -- LrHttp.post signature (verified from Adobe SDK and reference plugins):
 --     LrHttp.post(url, body, headers, method?, timeout?)
 -- Where `method` is an optional verb override ('PUT', 'DELETE', ...).
-local HTTP_TIMEOUT_SECONDS = 30
-
 local function defaultHttp()
 	local LrHttp = import 'LrHttp'
 	return {
-		request = function(method, url, headers, body)
+		request = function(method, url, headers, body, timeout)
+			local t = timeout or HTTP_TIMEOUT_SECONDS
 			if method == 'GET' then
-				return LrHttp.get(url, headers, HTTP_TIMEOUT_SECONDS)
+				return LrHttp.get(url, headers, t)
 			end
-			return LrHttp.post(url, body or '', headers, method, HTTP_TIMEOUT_SECONDS)
+			return LrHttp.post(url, body or '', headers, method, t)
 		end,
 	}
 end
@@ -53,15 +63,38 @@ local function defaultSleep()
 	return function(_) end
 end
 
+local function formatHeaderError(errObj)
+	if type(errObj) == 'table' then
+		return tostring(errObj.name or errObj.message or 'unknown')
+	end
+	return tostring(errObj or 'unknown')
+end
+
+local function leafNameOf(path)
+	if not path or path == '' then return nil end
+	local norm = Paths.normalizeSeparators(path)
+	local leaf = norm:match('([^/]+)$')
+	if leaf and leaf ~= '' then return leaf end
+	return nil
+end
+
 function M.new(opts)
 	assert(opts, 'opts required')
 	local self = setmetatable({}, M)
 	self.serverUrl = trimSlash(opts.serverUrl or '')
-	self.apiKey = opts.apiKey or ''
+	self.apiKey = trim(opts.apiKey or '')
 	self.http = opts.http or defaultHttp()
 	self.sleep = opts.sleep or defaultSleep()
 	self.maxRetries = opts.maxRetries or 3
+	self.batchSize = opts.batchSize or DEFAULT_BATCH_SIZE
+	self.logger = opts.logger
 	return self
+end
+
+function M:_log(level, msg)
+	if self.logger and type(self.logger[level]) == 'function' then
+		self.logger[level](msg)
+	end
 end
 
 function M:_headers(extraJson)
@@ -83,33 +116,61 @@ function M:_downloadHeaders()
 end
 
 -- Internal: run a request with retries. Returns (body, headers, err).
-function M:_request(method, path, body, headersOverride)
+function M:_request(method, path, body, headersOverride, timeout)
+	if self.serverUrl == '' then
+		return nil, nil, Errors.make('bad_config', 'Immich server URL is empty')
+	end
 	local url = self.serverUrl .. path
 	local attempts = 0
 	while true do
 		attempts = attempts + 1
 		local respBody, respHeaders = self.http.request(
-			method, url, headersOverride or self:_headers(body ~= nil), body)
+			method, url, headersOverride or self:_headers(body ~= nil), body, timeout)
 		local status = respHeaders and tonumber(respHeaders.status) or nil
+
 		-- Lightroom sometimes surfaces an `error` key on headers for network
-		-- failures rather than a status code.
+		-- failures rather than a status code, or returns nil headers on failure.
 		if respHeaders and respHeaders.error then
+			local errName = formatHeaderError(respHeaders.error)
 			if attempts <= self.maxRetries then
+				self:_log('warn', ('ImmichAPI %s %s network error (%s), retry %d/%d'):format(
+					method, path, errName, attempts, self.maxRetries))
 				self.sleep(math.min(2 ^ (attempts - 1), 8))
 			else
-				return nil, respHeaders, Errors.make('network',
-					'Network error: ' .. tostring(respHeaders.error.name or 'unknown'))
+				self:_log('error', ('ImmichAPI %s %s failed after %d attempts: %s'):format(
+					method, path, attempts, errName))
+				return nil, respHeaders, Errors.make('network', 'Network error: ' .. errName)
 			end
-		elseif status and (status == 429 or status >= 500) then
+		elseif status == nil then
 			if attempts <= self.maxRetries then
+				self:_log('warn', ('ImmichAPI %s %s returned no HTTP status, retry %d/%d'):format(
+					method, path, attempts, self.maxRetries))
 				self.sleep(math.min(2 ^ (attempts - 1), 8))
 			else
+				self:_log('error', ('ImmichAPI %s %s returned no HTTP status after %d attempts'):format(
+					method, path, attempts))
+				return nil, respHeaders, Errors.make('network',
+					'No HTTP response received (check server URL or network connection)')
+			end
+		elseif status == 429 or status >= 500 then
+			if attempts <= self.maxRetries then
+				self:_log('warn', ('ImmichAPI %s %s HTTP %d, retry %d/%d'):format(
+					method, path, status, attempts, self.maxRetries))
+				self.sleep(math.min(2 ^ (attempts - 1), 8))
+			else
+				self:_log('error', ('ImmichAPI %s %s HTTP %d after %d attempts'):format(
+					method, path, status, attempts))
 				return respBody, respHeaders, Errors.make('http_' .. status,
 					'HTTP ' .. status .. ' after ' .. attempts .. ' attempts')
 			end
-		elseif status and status >= 400 then
+		elseif status >= 400 then
+			self:_log('warn', ('ImmichAPI %s %s HTTP %d'):format(method, path, status))
 			return respBody, respHeaders, Errors.make('http_' .. status,
 				'HTTP ' .. status, respBody)
+		elseif status < 200 or status >= 300 then
+			self:_log('warn', ('ImmichAPI %s %s unexpected HTTP %d'):format(method, path, status))
+			return respBody, respHeaders, Errors.make('http_' .. status,
+				'Unexpected HTTP status ' .. status, respBody)
 		else
 			return respBody, respHeaders, nil
 		end
@@ -129,7 +190,7 @@ function M:ping()
 	local body, _, err = self:_request('GET', '/api/server/ping')
 	if err then return nil, err end
 	local data = decode(body)
-	if not data or data.res ~= 'pong' then
+	if type(data) ~= 'table' or data.res ~= 'pong' then
 		return nil, Errors.make('bad_response', 'Unexpected /server/ping response')
 	end
 	return data, nil
@@ -138,17 +199,47 @@ end
 function M:getMe()
 	local body, _, err = self:_request('GET', '/api/users/me')
 	if err then return nil, err end
-	return decode(body), nil
+	local data = decode(body)
+	if type(data) ~= 'table' then
+		return nil, Errors.make('bad_response', 'Unexpected /users/me response')
+	end
+	return data, nil
 end
 
+-- Lists owned albums and albums shared with the user, deduplicated by id.
 function M:listAlbums()
 	local body, _, err = self:_request('GET', '/api/albums')
 	if err then return nil, err end
-	local data = decode(body)
-	if type(data) ~= 'table' then
+	local owned = decode(body)
+	if type(owned) ~= 'table' then
 		return nil, Errors.make('bad_response', 'Expected array of albums')
 	end
-	return data, nil
+
+	local merged = {}
+	local seen = {}
+	for _, album in ipairs(owned) do
+		if album.id and not seen[album.id] then
+			seen[album.id] = true
+			table.insert(merged, album)
+		end
+	end
+
+	local sharedBody, _, sharedErr = self:_request('GET', '/api/albums?shared=true')
+	if sharedErr then
+		self:_log('warn', 'Could not fetch shared albums: ' .. Errors.format(sharedErr))
+	else
+		local shared = decode(sharedBody)
+		if type(shared) == 'table' then
+			for _, album in ipairs(shared) do
+				if album.id and not seen[album.id] then
+					seen[album.id] = true
+					table.insert(merged, album)
+				end
+			end
+		end
+	end
+
+	return merged, nil
 end
 
 -- Returns array of libraries: { id, name, ownerId, importPaths = {…}, … }.
@@ -166,42 +257,208 @@ function M:listLibraries()
 	return data, nil
 end
 
--- Returns { id, albumName, assets = { {id, originalPath, originalFileName, checksum}, … } }
+-- Queries POST /api/search/metadata and returns (items, nil, assetsBox) or (nil, err).
+function M:searchMetadata(query)
+	local body = JSON:encode(query or {})
+	local respBody, _, err = self:_request('POST', '/api/search/metadata', body)
+	if err then return nil, err, nil end
+	local data = decode(respBody)
+	if type(data) ~= 'table' then
+		return nil, Errors.make('bad_response', 'Unexpected /search/metadata response'), nil
+	end
+	if type(data.assets) == 'table' and type(data.assets.items) == 'table' then
+		return data.assets.items, nil, data.assets
+	end
+	if type(data.items) == 'table' then
+		return data.items, nil, data
+	end
+	return {}, nil, data.assets or data
+end
+
+-- Paginate POST /api/search/metadata with albumIds to fetch all assets in an
+-- album. Used as an automatic fallback when GET /api/albums/{id} omits inline
+-- assets (as in newer Immich API versions or certain shared albums).
+function M:getAlbumAssetsViaSearch(albumId)
+	local pageSize = 500
+	local maxPages = 100
+	local page = 1
+	local all = {}
+	local seen = {}
+
+	while page <= maxPages do
+		local items, err, box = self:searchMetadata({
+			albumIds = { albumId },
+			page = page,
+			size = pageSize,
+		})
+		if err then return nil, err end
+		if not items or #items == 0 then break end
+
+		local addedThisPage = 0
+		for _, item in ipairs(items) do
+			if item.id and not seen[item.id] then
+				seen[item.id] = true
+				table.insert(all, item)
+				addedThisPage = addedThisPage + 1
+			end
+		end
+		-- Guard against servers that ignore `page` and repeat page 1.
+		if addedThisPage == 0 then break end
+
+		local hasMore = false
+		if type(box) == 'table' then
+			if box.nextPage ~= nil and tostring(box.nextPage) ~= '' then
+				hasMore = true
+				page = tonumber(box.nextPage) or (page + 1)
+			elseif box.hasNextPage == true then
+				hasMore = true
+				page = page + 1
+			elseif type(box.totalPages) == 'number' and page < box.totalPages then
+				hasMore = true
+				page = page + 1
+			end
+		end
+		if not hasMore then break end
+	end
+
+	return all, nil
+end
+
+-- Returns { id, albumName, assetCount, assets = { {id, originalPath, originalFileName, checksum, type}, … } }
+-- If GET /api/albums/{id}?withoutAssets=false omits or returns an empty assets
+-- array while assetCount > 0 (newer Immich versions), falls back to paginating
+-- POST /api/search/metadata with albumIds.
 function M:getAlbum(albumId)
 	local body, _, err = self:_request('GET',
 		'/api/albums/' .. albumId .. '?withoutAssets=false')
 	if err then return nil, err end
-	return decode(body), nil
+	local data = decode(body)
+	if type(data) ~= 'table' then
+		return nil, Errors.make('bad_response', 'Unexpected /albums response')
+	end
+
+	local inlineCount = type(data.assets) == 'table' and #data.assets or 0
+	local reportedCount = tonumber(data.assetCount) or 0
+	if inlineCount > 0 then
+		data._assetsSource = 'album'
+		return data, nil
+	end
+
+	if reportedCount > 0 or data.assets == nil then
+		self:_log('info', ('GET /api/albums/%s returned %d inline assets (assetCount=%d); trying POST /api/search/metadata fallback'):format(
+			tostring(albumId), inlineCount, reportedCount))
+		local searched, searchErr = self:getAlbumAssetsViaSearch(albumId)
+		if searchErr then
+			self:_log('warn', 'Album asset search fallback failed: ' .. Errors.format(searchErr))
+			data.assets = data.assets or {}
+			data._assetsFallbackError = searchErr
+		else
+			data.assets = searched or {}
+			data._assetsSource = 'search/metadata'
+			self:_log('info', ('Album asset search fallback returned %d assets'):format(#data.assets))
+		end
+	else
+		data.assets = data.assets or {}
+		data._assetsSource = 'album'
+	end
+
+	return data, nil
+end
+
+-- Look up a non-trashed Immich asset by its Immich-side originalPath.
+-- Tries exact `originalPath` search first, then falls back to searching by
+-- `originalFileName` and matching the normalized path (handles case differences
+-- on macOS/Windows hosts). Returns (asset, nil) if found, (nil, nil) if not
+-- found, or (nil, err) on API failure.
+function M:findAssetByOriginalPath(immichPath)
+	if immichPath == nil or immichPath == '' then return nil, nil end
+	local targetKey = Paths.normalizeKey(immichPath)
+
+	local function pickMatch(items)
+		for _, item in ipairs(items or {}) do
+			if item.id and not item.isTrashed and item.originalPath then
+				if Paths.normalizeKey(item.originalPath) == targetKey then
+					return item
+				end
+			end
+		end
+		return nil
+	end
+
+	local items, err = self:searchMetadata({ originalPath = immichPath, size = 10 })
+	if err then return nil, err end
+	local matched = pickMatch(items)
+	if matched then return matched, nil end
+
+	local leaf = leafNameOf(immichPath)
+	if leaf then
+		local byName, err2 = self:searchMetadata({ originalFileName = leaf, size = 50 })
+		if err2 then return nil, err2 end
+		matched = pickMatch(byName)
+		if matched then return matched, nil end
+	end
+
+	return nil, nil
 end
 
 -- Downloads the original asset bytes from GET /api/assets/{id}/original.
+-- Uses a longer timeout because originals (RAWs / videos) can be large.
 -- The caller is responsible for writing the returned binary string to disk.
 function M:downloadAsset(assetId)
 	if assetId == nil or assetId == '' then
 		return nil, Errors.make('bad_request', 'assetId is required')
 	end
 	local body, _, err = self:_request('GET',
-		'/api/assets/' .. assetId .. '/original', nil, self:_downloadHeaders())
+		'/api/assets/' .. assetId .. '/original', nil, self:_downloadHeaders(), DOWNLOAD_TIMEOUT_SECONDS)
 	if err then return nil, err end
 	return body, nil
 end
 
+local function mutateAlbumAssets(self, method, albumId, assetIds, countKey, allowDuplicate)
+	if #assetIds == 0 then return { [countKey] = 0, failed = {} }, nil end
+
+	local totalSucceeded = 0
+	local failed = {}
+	local batchSize = self.batchSize
+
+	for startIdx = 1, #assetIds, batchSize do
+		local batch = {}
+		local endIdx = math.min(startIdx + batchSize - 1, #assetIds)
+		for i = startIdx, endIdx do
+			table.insert(batch, assetIds[i])
+		end
+
+		local body = JSON:encode({ ids = batch })
+		local respBody, _, err = self:_request(method,
+			'/api/albums/' .. albumId .. '/assets', body)
+		if err then return nil, err end
+
+		local decoded = decode(respBody)
+		if type(decoded) == 'table' and #decoded > 0 and type(decoded[1]) == 'table' and decoded[1].id ~= nil then
+			for _, item in ipairs(decoded) do
+				if item.success == true or (allowDuplicate and item.error == 'duplicate') then
+					totalSucceeded = totalSucceeded + 1
+				else
+					table.insert(failed, {
+						id = item.id,
+						error = item.error or 'unknown',
+					})
+				end
+			end
+		else
+			totalSucceeded = totalSucceeded + #batch
+		end
+	end
+
+	return { [countKey] = totalSucceeded, failed = failed }, nil
+end
+
 function M:addAssetsToAlbum(albumId, assetIds)
-	if #assetIds == 0 then return { added = 0 }, nil end
-	local body = JSON:encode({ ids = assetIds })
-	local respBody, _, err = self:_request('PUT',
-		'/api/albums/' .. albumId .. '/assets', body)
-	if err then return nil, err end
-	return decode(respBody) or { added = #assetIds }, nil
+	return mutateAlbumAssets(self, 'PUT', albumId, assetIds or {}, 'added', true)
 end
 
 function M:removeAssetsFromAlbum(albumId, assetIds)
-	if #assetIds == 0 then return { removed = 0 }, nil end
-	local body = JSON:encode({ ids = assetIds })
-	local respBody, _, err = self:_request('DELETE',
-		'/api/albums/' .. albumId .. '/assets', body)
-	if err then return nil, err end
-	return decode(respBody) or { removed = #assetIds }, nil
+	return mutateAlbumAssets(self, 'DELETE', albumId, assetIds or {}, 'removed', false)
 end
 
 return M

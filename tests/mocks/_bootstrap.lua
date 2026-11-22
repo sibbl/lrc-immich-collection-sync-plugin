@@ -3,7 +3,8 @@
   `src/*.lua` modules can be require()'d under plain Lua 5.1 / LuaJIT.
 
   The stubs are intentionally dumb: tests override behavior on a per-spec
-  basis using `_G.<name> = <override>` before requiring the module under test.
+  basis using `registerLrMock(name, impl)` before requiring the module under
+  test.
 ]]
 
 -- test.sh `cd`s to the repository root before invoking us, so relative paths
@@ -55,6 +56,12 @@ function _G.resetLrMocks()
 	registerLrMock('LrPathUtils', {
 		child = function(a, b) return a .. '/' .. b end,
 		getStandardFilePath = function() return '/tmp' end,
+	})
+	registerLrMock('LrApplication', {
+		activeCatalog = function() return { getActiveSources = function() return {} end } end,
+	})
+	registerLrMock('LrDialogs', {
+		message = function() end,
 	})
 end
 

@@ -40,7 +40,7 @@ tests/
 ## Conventions
 
 - Pure modules (`PathMapper`, `MappingStore`, `CatalogIndex`, `SyncEngine`,
-  `ImmichAPI`, `util.Paths`) are tested directly.
+  `ImmichAPI`, `Paths`, `PathMappingChoices`, `CatalogImport`, `Dialogs`) are tested directly.
 - LR-coupled modules (menu scripts, `PluginInfoProvider`, `Init`) are
   **not** tested headlessly. The rule: if a module cannot be unit tested
   at all, keep it thin and delegate real work to tested pure modules.
