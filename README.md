@@ -21,7 +21,7 @@ Both Lightroom and Immich reference the same physical files on disk (for example
 
 ### Option 1: Download a release
 
-1. Download `lrc-immich-collection-sync-plugin.lrplugin.zip` from the [Releases](https://github.com/sibbl/lrc-immich-plugin/releases) page and unzip it.
+1. Download `lrc-immich-collection-sync-plugin.lrplugin.zip` from the [Releases](https://github.com/sibbl/lrc-immich-collection-sync-plugin/releases) page and unzip it.
 2. In Lightroom Classic, open **File > Plug-in Manager…**, click **Add**, and select `lrc-immich-collection-sync-plugin.lrplugin`.
 
 ### Option 2: Build from source
