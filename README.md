@@ -2,18 +2,26 @@
 
 Keep **Lightroom Classic collections** and **Immich albums** in sync on demand — without uploading or duplicating files.
 
-Both Lightroom and Immich reference the same physical files on disk (for example, on a NAS) via path-prefix mappings. If an Immich asset is not yet in your Lightroom catalog, the plugin imports the existing local file in place; if an asset has no mapped local path, you can optionally confirm a download fallback during **Immich → Lightroom** sync.
+## Why this plugin?
+
+Originally forked from [bmachek/lrc-immich-plugin](https://github.com/bmachek/lrc-immich-plugin), this plugin solves a different workflow:
+
+- **Upload/Publish plugins** (like the original `lrc-immich-plugin`) are built around Lightroom Export/Publish Services that *upload* rendered JPEGs or originals from Lightroom to Immich.
+- **This plugin** is built for **shared-storage setups** (for example, a NAS or Immich External Library) where Immich and Lightroom already see the same physical photo files on disk. Instead of uploading duplicates, it translates folder prefixes so you can curate albums on your phone in Immich *or* in Lightroom on desktop and sync **bidirectionally** — plus run Immich AI Smart Search and two-way metadata sync across your entire mapped catalog, not just plugin-uploaded photos.
+
+If an Immich asset is not yet in your Lightroom catalog, the plugin imports the existing local file in place; if an asset has no mapped local path, you can optionally confirm a download fallback during **Immich → Lightroom** sync.
 
 ## Features
 
-- **Bidirectional album ↔ collection sync** (remembers your last chosen direction per collection)
-  - **Immich → Lightroom**: mirrors an Immich album into a Lightroom collection (imports already-local files into the catalog if needed, and offers an optional download fallback for unmapped assets)
-  - **Lightroom → Immich**: mirrors a Lightroom collection into an Immich album (looks up matching Immich assets by mapped path and adds/removes album membership)
-- **Two-way metadata sync** — sync star ratings, favorites ↔ pick flags, captions ↔ descriptions, GPS coordinates, and keywords ↔ Immich tags (+ Immich people → `People/<name>`) with a preview and optional overwrite toggle
-- **Immich Smart Search inside Lightroom** — run AI/CLIP search queries (*"sunset over mountains"*) and gather all matching local catalog photos into an `Immich search results` collection
-- **Open linked album & create share links** — jump straight to a linked Immich album in your browser or generate a share link (with optional expiry/password)
-- **Owned and shared Immich albums** supported
-- **Preview before applying** — inspect counts, active path mappings, and warnings before touching your catalog or album
+- **Bidirectional album ↔ collection sync** (per-catalog links; remembers your last chosen direction per collection)
+  - **Immich → Lightroom**: mirrors an Immich album into a Lightroom collection, imports already-local files into the catalog in place when needed, and offers an optional download fallback for unmapped assets (tracked per catalog to prevent duplicate downloads)
+  - **Lightroom → Immich**: mirrors a Lightroom collection into an Immich album by resolving mapped paths via Immich's metadata search and adding/removing album membership
+- **Two-way metadata sync** — sync star ratings, favorites ↔ pick flags, captions ↔ descriptions, GPS coordinates, and keywords ↔ Immich tags (+ Immich people → `People/<name>` on pull) with a preview and optional overwrite toggle
+- **Immich Smart Search inside Lightroom** — run AI/CLIP search queries (*"sunset over mountains"*) against Immich and collect all matching local catalog photos into an `Immich search results` collection
+- **Open linked album & create share links** — jump straight to a linked Immich album in your browser or generate a share link (with optional expiry, password, and download/upload/EXIF toggles)
+- **Flexible path mapping UI** — auto-discovers Immich External Libraries, maps Docker `/data/` (covering both `/data/library/` and `/data/upload/`) in one rule, and supports custom longest-prefix overrides
+- **Owned & shared Immich albums** and **Immich 3.0+ compatible** (automatically falls back to paginated `/api/search/metadata` when `/api/albums/{id}` omits inline assets)
+- **Preview & diagnostics before applying** — shows collection/catalog/album counts, active path mappings, `immichPath → localPath` warnings, and optional `ImmichSync.log` debug logging before touching your catalog or album
 
 > **What this plugin does not do:** file uploads, background live sync, smart collections, or automatic album/collection creation for links.
 
@@ -125,6 +133,6 @@ Developer documentation lives in [`docs/`](docs/):
 
 ## Credits
 
-- [Jeffrey Friedl for JSON.lua](http://regex.info/blog/lua/json)
-- [Min Idzelis](https://github.com/midzelis/mi.Immich.Publisher)
-- [Ben Machek](https://github.com/bmachek/lrc-immich-plugin)
+- [Bastian Machek & contributors (`bmachek/lrc-immich-plugin`)](https://github.com/bmachek/lrc-immich-plugin) — original Lightroom Classic Immich plugin fork and inspiration for Smart Search, metadata sync, album share links, and Immich 3.0 API patterns
+- [Min Idzelis (`midzelis/mi.Immich.Publisher`)](https://github.com/midzelis/mi.Immich.Publisher) — Lightroom SDK reference patterns and release workflow inspiration
+- [Jeffrey Friedl (`JSON.lua`)](http://regex.info/blog/lua/json) — pure-Lua JSON encoder/decoder
