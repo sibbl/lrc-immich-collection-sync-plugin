@@ -242,6 +242,8 @@ describe('SyncEngine.applyDiff', function()
 		assertEq(result.removedLocal, 1)
 		assertEq(added[1], 'ALB'); assertEq(added[2][1], 'X')
 		assertEq(removed[1], 'ALB'); assertEq(removed[2][1], 'Y')
+		assertEq(collectionCalls.add[1], 'p1')
+		assertEq(collectionCalls.rem[1], 'p2')
 		assertEq(wwaCalled, true)
 	end)
 
