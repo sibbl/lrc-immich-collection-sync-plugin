@@ -9,7 +9,6 @@
 ]]
 
 local LrApplication = import 'LrApplication'
-local LrFunctionContext = import 'LrFunctionContext'
 local LrTasks = import 'LrTasks'
 local LrDialogs = import 'LrDialogs'
 local LrView = import 'LrView'
@@ -25,10 +24,11 @@ local CatalogIndex = require 'CatalogIndex'
 local SmartSearch = require 'SmartSearch'
 local Paths = require 'Paths'
 local Dialogs = require 'Dialogs'
+local RetryDialog = require 'RetryDialog'
 local Errors = require 'Errors'
 local Logger = require 'Logger'
 
-LrFunctionContext.postAsyncTaskWithContext('ImmichSmartSearch', function(context)
+local function chooseSearch(context)
 	if not Dialogs.requireCredentials() then return end
 
 	local props = LrBinding.makePropertyTable(context)
@@ -80,14 +80,13 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSmartSearch', function(context
 		return
 	end
 
-	local configuredMappings = Settings.getPathMappings()
-	if #configuredMappings == 0 then
-		LrDialogs.message('Immich Collection Sync',
-			'No path mappings configured yet. Configure them in File > Plug-in Manager… > Immich Collection Sync first.',
-			'warning')
-		return
-	end
+	return { query = query, maxResults = props.maxResults, catalog = LrApplication.activeCatalog() }
+end
 
+local function search(context, selection)
+	local configuredMappings, choice = RetryDialog.requirePathMappings(context)
+	if not configuredMappings then return choice end
+	local query, catalog = selection.query, selection.catalog
 	local progress = LrProgressScope{
 		title = ('Immich Smart Search: %s'):format(query),
 		functionContext = context,
@@ -99,7 +98,7 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSmartSearch', function(context
 		isCanceled = function() return progress:isCanceled() end,
 	}
 
-	Logger.info(('Running Immich smart search: query="%s" maxResults=%d'):format(query, props.maxResults))
+	Logger.info(('Running Immich smart search: query="%s" maxResults=%d'):format(query, selection.maxResults))
 	progress:setCaption(('Searching Immich for "%s"…'):format(query))
 
 	local api = ImmichAPI.new{
@@ -107,23 +106,20 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSmartSearch', function(context
 		apiKey = Settings.getApiKey(),
 		logger = Logger,
 	}
-	local searchAssets, err = api:searchSmart(query, { maxResults = props.maxResults })
+	local searchAssets, err = api:searchSmart(query, { maxResults = selection.maxResults })
+	if progress:isCanceled() then progress:done(); return end
 	if err then
 		progress:done()
 		Logger.error('Smart search failed: ' .. Errors.format(err))
-		LrDialogs.message('Immich Collection Sync — Smart search failed', Errors.format(err), 'critical')
-		return
+		return RetryDialog.problem(context, 'Immich Collection Sync — Smart search failed', Errors.format(err))
 	end
-	if progress:isCanceled() then progress:done(); return end
 	if #searchAssets == 0 then
 		progress:done()
-		LrDialogs.message('Immich Collection Sync — No results',
-			('No photos in Immich matched "%s".'):format(query), 'info')
-		return
+		return RetryDialog.problem(context, 'Immich Collection Sync — No results',
+			('No photos in Immich matched "%s".'):format(query))
 	end
 
 	progress:setCaption('Indexing Lightroom catalog…')
-	local catalog = LrApplication.activeCatalog()
 	local caseFold = function(p) return Paths.normalizeKey(p or '') end
 	local catalogIndex, idxErr = CatalogIndex.buildFromCatalog(catalog, caseFold, progressAdapter)
 	if not catalogIndex then
@@ -141,50 +137,42 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSmartSearch', function(context
 
 	if #match.matchedPhotos == 0 then
 		progress:done()
-		LrDialogs.message('Immich Collection Sync — No catalog matches',
+		return RetryDialog.problem(context, 'Immich Collection Sync — No catalog matches',
 			('Immich returned %d result%s for "%s", but none matched photos in this Lightroom catalog.\n\n'
 				.. '• Unmapped Immich paths: %d\n'
 				.. '• Mapped, but not imported in Lightroom: %d'):format(
 				match.totalResults, match.totalResults == 1 and '' or 's', query,
-				match.unmappedCount, match.notInCatalogCount),
-			'info')
-		return
+				match.unmappedCount, match.notInCatalogCount), true)
 	end
 
 	local collectionName = SmartSearch.buildCollectionName(query)
 	progress:setCaption(('Updating collection "%s"…'):format(collectionName))
 
-	local set, collection
-	local okSet, statusSet = LrTasks.pcall(function()
-		return catalog:withWriteAccessDo('Immich search collection set', function()
+	local collection
+	local ok, status = LrTasks.pcall(function()
+		local set
+		catalog:withWriteAccessDo('Immich search collection set', function()
 			set = catalog:createCollectionSet('Immich search results', nil, true)
 		end, { timeout = 30 })
-	end)
-	local okCol, statusCol = LrTasks.pcall(function()
-		return catalog:withWriteAccessDo('Immich search: ' .. collectionName, function()
+		if not set then return 'aborted' end
+		catalog:withWriteAccessDo('Immich search: ' .. collectionName, function()
 			collection = catalog:createCollection(collectionName, set, true)
 		end, { timeout = 30 })
-	end)
-	local okAdd, statusAdd = LrTasks.pcall(function()
+		if not collection then return 'aborted' end
 		return catalog:withWriteAccessDo('Immich search results: ' .. collectionName, function()
-			if collection then
-				local existing = collection:getPhotos()
-				if existing and #existing > 0 then
-					collection:removePhotos(existing)
-				end
-				collection:addPhotos(match.matchedPhotos)
+			local existing = collection:getPhotos()
+			if existing and #existing > 0 then
+				collection:removePhotos(existing)
 			end
+			collection:addPhotos(match.matchedPhotos)
 		end, { timeout = 30 })
 	end)
 	progress:done()
 
-	if not okSet or not okCol or not okAdd or not collection
-		or statusSet == 'aborted' or statusCol == 'aborted' or statusAdd == 'aborted' then
+	if not ok or status == 'aborted' or status == false then
 		Logger.error('Smart search collection creation failed')
-		LrDialogs.message('Immich Collection Sync — Smart search',
-			'Matched photos, but Lightroom could not create or update the search results collection (catalog busy). Please retry.',
-			'warning')
-		return
+		return RetryDialog.problem(context, 'Immich Collection Sync — Smart search',
+			'Lightroom could not update the search results collection. Retry when the catalog is available.')
 	end
 
 	catalog:setActiveSources({ collection })
@@ -192,4 +180,6 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichSmartSearch', function(context
 
 	LrDialogs.showBezel(('%d photo%s → "%s"'):format(
 		#match.matchedPhotos, #match.matchedPhotos == 1 and '' or 's', collectionName))
-end)
+end
+
+RetryDialog.run('ImmichSmartSearch', chooseSearch, search)

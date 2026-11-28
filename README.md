@@ -102,8 +102,8 @@ All actions live under **Library > Plug-in Extras**:
 
 ## Troubleshooting
 
-- **`missing locally` warning in Preview**: The preview prints `immichPath → localPath`. Check that your NAS/drive is mounted and that the translated local path matches the actual file on disk (watch out for extra subfolders like `/library/library/`).
-- **`not found on Immich` warning (`Lightroom → Immich`)**: The photo's local path maps to an Immich path that Immich has not indexed yet. Upload or scan the file in Immich first, then sync again.
+- **`missing locally` warning in Preview.** The preview prints `immichPath → localPath`. Check that your NAS or drive is mounted and that the translated path matches the file on disk, including any extra subfolders such as `/library/library/`. Reconnect the drive and click **Retry**, or use **Add path mapping…** to add or correct a prefix. Saving a mapping refreshes the preview with the same direction.
+- **`not found on Immich` warning during Lightroom → Immich sync.** If Immich has yet to index the photo, upload or scan it in Immich, then click **Retry** in the preview.
 - **Immich album shows `0 assets fetched` while `assetCount > 0`**: Check that your Immich API key has `album.read` and `asset.read` permissions and that your user has access to the album's assets.
 - **Need detailed logs?** Enable **Enable debug logging** under **Diagnostics** in Plug-in Manager, run an action again, and click **Show log file**.
 

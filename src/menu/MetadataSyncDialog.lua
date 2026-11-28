@@ -8,7 +8,6 @@
 ]]
 
 local LrApplication = import 'LrApplication'
-local LrFunctionContext = import 'LrFunctionContext'
 local LrTasks = import 'LrTasks'
 local LrDialogs = import 'LrDialogs'
 local LrView = import 'LrView'
@@ -20,6 +19,7 @@ local ImmichAPI = require 'ImmichAPI'
 local PathMapper = require 'PathMapper'
 local MetadataEngine = require 'MetadataEngine'
 local Dialogs = require 'Dialogs'
+local RetryDialog = require 'RetryDialog'
 local Errors = require 'Errors'
 local Logger = require 'Logger'
 
@@ -57,16 +57,8 @@ local function buildPreviewText(direction, totalPhotos, matchedCount, unmappedCo
 	return table.concat(lines, '\n')
 end
 
-LrFunctionContext.postAsyncTaskWithContext('ImmichMetadataSync', function(context)
+local function chooseMetadata(context)
 	if not Dialogs.requireCredentials() then return end
-
-	local configuredMappings = Settings.getPathMappings()
-	if #configuredMappings == 0 then
-		LrDialogs.message('Immich Collection Sync',
-			'No path mappings configured yet. Configure them in File > Plug-in Manager… > Immich Collection Sync first.',
-			'warning')
-		return
-	end
 
 	local catalog = LrApplication.activeCatalog()
 	local photos = catalog:getTargetPhotos() or {}
@@ -136,7 +128,7 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichMetadataSync', function(contex
 		return
 	end
 
-	Settings.setMetadataSyncPrefs({
+	local preferences = {
 		direction = props.direction,
 		rating = props.rating,
 		favorite = props.favorite,
@@ -144,8 +136,15 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichMetadataSync', function(contex
 		gps = props.gps,
 		keywords = props.keywords,
 		overwrite = props.overwrite,
-	})
+	}
+	Settings.setMetadataSyncPrefs(preferences)
+	return { catalog = catalog, photos = photos, preferences = preferences }
+end
 
+local function syncMetadata(context, selection)
+	local configuredMappings, choice = RetryDialog.requirePathMappings(context)
+	if not configuredMappings then return choice end
+	local catalog, photos, preferences = selection.catalog, selection.photos, selection.preferences
 	local progress = LrProgressScope{
 		title = 'Immich Metadata Sync',
 		functionContext = context,
@@ -164,7 +163,7 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichMetadataSync', function(contex
 	}
 	local pathMapper = PathMapper.new(configuredMappings)
 
-	Logger.info(('Starting metadata sync (%s) for %d photos'):format(props.direction, #photos))
+	Logger.info(('Starting metadata sync (%s) for %d photos'):format(preferences.direction, #photos))
 
 	local matchedPairs = {}
 	local unmappedCount = 0
@@ -207,59 +206,32 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichMetadataSync', function(contex
 	end
 
 	local diff = MetadataEngine.computeDiff{
-		direction = props.direction,
+		direction = preferences.direction,
 		pairs = matchedPairs,
-		fields = {
-			rating = props.rating,
-			favorite = props.favorite,
-			caption = props.caption,
-			gps = props.gps,
-			keywords = props.keywords,
-		},
-		overwrite = props.overwrite,
+		fields = preferences,
+		overwrite = preferences.overwrite,
 	}
 
-	local previewText = buildPreviewText(
-		props.direction, total, #matchedPairs, unmappedCount, notFoundCount, lookupErrors, diff)
-	local previewProps = LrBinding.makePropertyTable(context)
-	previewProps.preview = previewText
-
-	local previewContents = f:column {
-		spacing = f:control_spacing(),
-		bind_to_object = previewProps,
-		f:static_text {
-			title = diff.summary.updateCount > 0
-				and 'Review planned metadata changes before applying.'
-				or 'No metadata changes to apply.',
-			font = '<system/bold>',
-		},
-		f:edit_field {
-			value = LrView.bind 'preview',
-			width_in_chars = 80,
-			height_in_lines = 16,
-			enabled = true,
-		},
-	}
-
-	progress:setCaption('Waiting for confirmation…')
-	if diff.summary.updateCount == 0 then
-		LrDialogs.presentModalDialog{
-			title = 'Immich Collection Sync — Metadata already up to date',
-			contents = previewContents,
-			actionVerb = 'Close',
-			cancelVerb = '< exclude >',
-		}
-		progress:done()
-		return
+	local hasChanges = diff.summary.updateCount > 0
+	local hasDiagnostics = unmappedCount > 0 or notFoundCount > 0 or #lookupErrors > 0
+	local title = 'Immich Collection Sync — Metadata preview'
+	if not hasChanges then
+		title = hasDiagnostics and 'Immich Collection Sync — Some photos could not be matched'
+			or 'Immich Collection Sync — Metadata already up to date'
 	end
-
-	local confirm = LrDialogs.presentModalDialog{
-		title = 'Immich Collection Sync — Metadata preview',
-		contents = previewContents,
-		actionVerb = 'Apply',
-		cancelVerb = 'Cancel',
-	}
-	if confirm ~= 'ok' then progress:done(); return end
+	progress:setCaption('Waiting for confirmation…')
+	local previewChoice = RetryDialog.preview(context, {
+		title = title,
+		heading = hasChanges and 'Review planned metadata changes before applying.' or 'No metadata changes to apply.',
+		text = buildPreviewText(preferences.direction, total, #matchedPairs, unmappedCount, notFoundCount, lookupErrors, diff),
+		width = 80,
+		height = 16,
+		hasChanges = hasChanges,
+		hasDiagnostics = hasDiagnostics,
+		canAddMapping = unmappedCount > 0 or notFoundCount > 0,
+	})
+	if progress:isCanceled() then progress:done(); return end
+	if previewChoice ~= 'apply' then progress:done(); return previewChoice end
 
 	local result = MetadataEngine.applyDiff(diff, {
 		immichApi = api,
@@ -289,9 +261,16 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichMetadataSync', function(contex
 		for _, e in ipairs(result.errors) do
 			table.insert(summaryLines, ('  [%s] %s'):format(e.op, Errors.format(e.err)))
 		end
+		if not result.canceled then
+			table.insert(summaryLines, '\nRetry opens a new preview of the remaining changes.')
+			return RetryDialog.problem(context, 'Immich Collection Sync — Metadata sync finished with errors',
+				table.concat(summaryLines, '\n'))
+		end
 	end
 
 	LrDialogs.message('Immich Collection Sync — Metadata sync done',
 		table.concat(summaryLines, '\n'),
 		#result.errors > 0 and 'warning' or 'info')
-end)
+end
+
+RetryDialog.run('ImmichMetadataSync', chooseMetadata, syncMetadata)
