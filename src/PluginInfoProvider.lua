@@ -21,6 +21,7 @@ local ImmichAPI = require 'ImmichAPI'
 local Logger = require 'Logger'
 local Errors = require 'Errors'
 local PathMappingChoices = require 'PathMappingChoices'
+local PathMappingDialog = require 'PathMappingDialog'
 
 local M = {}
 
@@ -171,76 +172,6 @@ local function presentLibraryMappingDialog(context, f, libraries, currentMapping
 	return PathMappingChoices.rowsToMappings(rows, function(row) return props[row.key] end)
 end
 
--- Modal dialog for adding (or overriding) a custom Immich prefix -> local folder mapping.
-local function presentCustomMappingDialog(context, f)
-	local props = LrBinding.makePropertyTable(context)
-	props.label = ''
-	props.immich = ''
-	props.local_ = ''
-
-	local contents = f:column {
-		spacing = f:control_spacing(),
-		bind_to_object = props,
-		f:static_text {
-			title = 'Add a custom Immich storage path prefix (for example a per-user override like /data/library/alice/ or a custom container mount). Longest matching prefix wins.',
-			width_in_chars = 76,
-			height_in_lines = 3,
-		},
-		f:row {
-			f:static_text { title = 'Label', width = 120 },
-			f:edit_field {
-				value = LrView.bind 'label',
-				width_in_chars = 44,
-				immediate = true,
-				placeholder_string = 'e.g. Alice SSD override',
-			},
-		},
-		f:row {
-			f:static_text { title = 'Immich prefix', width = 120 },
-			f:edit_field {
-				value = LrView.bind 'immich',
-				width_in_chars = 44,
-				immediate = true,
-				placeholder_string = '/data/library/alice/',
-			},
-		},
-		f:row {
-			f:static_text { title = 'Local folder', width = 120 },
-			f:edit_field {
-				value = LrView.bind 'local_',
-				width_in_chars = 36,
-				immediate = true,
-				placeholder_string = '/Volumes/photos/alice/',
-			},
-			f:push_button {
-				title = 'Choose…',
-				action = function()
-					local result = LrDialogs.runOpenPanel{
-						title = 'Choose local folder for custom Immich prefix',
-						canChooseFiles = false,
-						canChooseDirectories = true,
-						canCreateDirectories = true,
-						allowsMultipleSelection = false,
-					}
-					if result and result[1] then props.local_ = result[1] end
-				end,
-			},
-		},
-	}
-
-	local ok = LrDialogs.presentModalDialog{
-		title = 'Add custom path mapping',
-		contents = contents,
-		actionVerb = 'Add mapping',
-	}
-	if ok ~= 'ok' then return nil end
-	return {
-		label = props.label,
-		immich = props.immich,
-		local_ = props.local_,
-	}
-end
-
 function M.sectionsForTopOfDialog(f, propertyTable)
 	-- Seed propertyTable from persisted settings.
 	propertyTable.serverUrl = Settings.getServerUrl()
@@ -334,16 +265,9 @@ function M.sectionsForTopOfDialog(f, propertyTable)
 
 	local function addCustomMapping()
 		LrFunctionContext.postAsyncTaskWithContext('ImmichSyncAddCustomMapping', function(context)
-			local entry = presentCustomMappingDialog(context, f)
-			if entry == nil then return end
-			local updated, err = PathMappingChoices.upsertMapping(Settings.getPathMappings(), entry)
-			if not updated then
-				LrDialogs.message('Invalid path mapping', err, 'warning')
-				return
-			end
-			Settings.setPathMappings(updated)
+			local updated = PathMappingDialog.addCustomMapping(context, f)
+			if not updated then return end
 			updateMappingSummary(propertyTable, updated)
-			Logger.info(('Added custom path mapping %s -> %s'):format(entry.immich or '', entry.local_ or ''))
 			LrDialogs.message('Path mappings updated',
 				PathMappingChoices.summarizeMappings(updated), 'info')
 		end)

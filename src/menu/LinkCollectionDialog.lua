@@ -8,7 +8,6 @@
 ]]
 
 local LrApplication = import 'LrApplication'
-local LrFunctionContext = import 'LrFunctionContext'
 local LrDialogs = import 'LrDialogs'
 local LrView = import 'LrView'
 local LrBinding = import 'LrBinding'
@@ -18,31 +17,36 @@ local Settings = require 'Settings'
 local MappingStore = require 'MappingStore'
 local ImmichAPI = require 'ImmichAPI'
 local Dialogs = require 'Dialogs'
+local RetryDialog = require 'RetryDialog'
 local Errors = require 'Errors'
 local Logger = require 'Logger'
 
-LrFunctionContext.postAsyncTaskWithContext('ImmichLinkCollection', function(context)
+local function chooseCollection()
 	if not Dialogs.requireCredentials() then return end
 	local collection, reason = Dialogs.activeCollection()
 	if not collection then
 		LrDialogs.message('Immich Collection Sync', reason, 'info')
 		return
 	end
+	return { collection = collection, catalog = LrApplication.activeCatalog() }
+end
 
+local function linkCollection(context, selection)
+	local collection = selection.collection
+	local serverUrl = Settings.getServerUrl()
 	local api = ImmichAPI.new{
-		serverUrl = Settings.getServerUrl(),
+		serverUrl = serverUrl,
 		apiKey = Settings.getApiKey(),
 		logger = Logger,
 	}
 	local albums, err = api:listAlbums()
 	if err then
 		Logger.error('Failed to list albums: ' .. Errors.format(err))
-		LrDialogs.message('Immich Collection Sync — could not fetch albums', Errors.format(err), 'critical')
-		return
+		return RetryDialog.problem(context, 'Immich Collection Sync — Could not fetch albums', Errors.format(err))
 	end
 	if #albums == 0 then
-		LrDialogs.message('Immich Collection Sync', 'No albums found on the Immich server.', 'info')
-		return
+		return RetryDialog.problem(context, 'Immich Collection Sync — No albums',
+			'Create an album in Immich, then retry to see it here.')
 	end
 
 	table.sort(albums, function(a, b)
@@ -58,9 +62,8 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichLinkCollection', function(cont
 		})
 	end
 
-	local catalog = LrApplication.activeCatalog()
 	local properties = LrBinding.makePropertyTable(context)
-	local store = MappingStore.new(LrPrefs.prefsForPlugin(), { catalogId = Dialogs.catalogId(catalog) })
+	local store = MappingStore.new(LrPrefs.prefsForPlugin(), { catalogId = Dialogs.catalogId(selection.catalog) })
 	local existing = store:get(collection.localIdentifier)
 	properties.selectedAlbumId = existing and existing.albumId or items[1].value
 
@@ -101,7 +104,7 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichLinkCollection', function(cont
 	store:set(collection.localIdentifier, {
 		albumId = chosen.id,
 		albumName = chosen.albumName,
-		serverUrl = Settings.getServerUrl(),
+		serverUrl = serverUrl,
 	})
 
 	Logger.info(('Linked collection "%s" (id=%s) to Immich album "%s" (id=%s)'):format(
@@ -113,4 +116,6 @@ LrFunctionContext.postAsyncTaskWithContext('ImmichLinkCollection', function(cont
 		('Linked "%s" to Immich album "%s".\nUse Library > Plug-in Extras > Immich Collection Sync: Sync… to sync.'):format(
 			collection:getName(), chosen.albumName or ''),
 		'info')
-end)
+end
+
+RetryDialog.run('ImmichLinkCollection', chooseCollection, linkCollection)

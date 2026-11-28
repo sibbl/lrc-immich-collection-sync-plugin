@@ -37,9 +37,14 @@ Three sections:
    - **Lightroom → Immich** — mirror the LR collection into the Immich
      album. Adds Immich assets whose path is in the collection; removes
      album assets whose path is not in the collection.
-4. The **preview dialog** shows counts and the first 5 warnings of each
-   class. Cancel or Apply.
-5. After apply, a summary dialog reports counts and any API errors.
+4. The **preview dialog** shows counts and paths that need attention. If a
+   drive is offline, reconnect it and click **Retry**. For a missing or
+   incorrect prefix, click **Add path mapping…**. Saving the mapping
+   refreshes the preview. Both actions keep the collection, album, and
+   direction you chose.
+5. Click **Apply** to confirm the displayed changes. The summary reports
+   completed changes and any errors. **Retry** on an error summary opens a
+   fresh preview of the remaining work.
 
 ## Step 4 — Unlink (rare)
 
